@@ -349,6 +349,9 @@ class VisionService:
             return None, 0.0
 
         raw_text, avg_conf = result
+        if raw_text is None:
+            return None, 0.0
+
         plate = self._parse_indonesian_plate(raw_text)
 
         return plate, avg_conf
