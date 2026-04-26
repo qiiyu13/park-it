@@ -78,3 +78,4 @@ Thumbs.db
 
 # v1 legacy system — excluded from v2 repo
 parking-system/
+license_plate_detector.pt
