@@ -1,10 +1,14 @@
 """Vision service — ANPR (plate recognition) and vehicle type detection.
 
 This module provides a unified interface for camera-based analysis.
-Both features use lightweight models (~21 MB total) that run on CPU.
+All models are lightweight (~27 MB total) and run on CPU.
 
-When both ANPR and vehicle detection are enabled, they share a single
-YOLO inference pass for maximum efficiency.
+Two YOLO models are used independently:
+  - Vehicle YOLO (yolov8n) — detects car/motorcycle/bus/truck
+  - Plate Detector YOLO — detects license plate regions for cropping before OCR
+
+OCR runs on the cropped plate region when a plate detector is available,
+falling back to full-frame OCR if no plate is detected.
 
 Dependencies (optional, installed via `pip install -e ".[vision]"`):
     - ultralytics (YOLOv8)
@@ -14,6 +18,8 @@ Dependencies (optional, installed via `pip install -e ".[vision]"`):
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,8 +57,9 @@ class VisionResult:
 class VisionService:
     """Lazy-loading vision service.
 
-    Models are only loaded when first needed.  When both ANPR and vehicle
-    detection are enabled, the YOLO model is shared between them.
+    Models are only loaded when first needed.  Vehicle detection uses a
+    dedicated YOLO model; ANPR uses a separate plate detector YOLO model
+    whose output is cropped before OCR.
     """
 
     _instance: VisionService | None = None
@@ -60,6 +67,7 @@ class VisionService:
     def __init__(self) -> None:
         self._yolo_model: Any | None = None
         self._ocr_model: Any | None = None
+        self._plate_detector: Any | None = None
         self._settings = get_settings()
 
     @classmethod
@@ -127,6 +135,24 @@ class VisionService:
 
         return self._ocr_model
 
+    def _load_plate_detector(self) -> Any:
+        """Load license plate detection YOLO model."""
+        if self._plate_detector is not None:
+            return self._plate_detector
+
+        model_name = self._settings.plate_detection_model
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError(
+                "ultralytics is required for plate detection. "
+                "Install with: pip install -e '.[vision]'"
+            )
+
+        logger.info("loading_plate_detector", model=model_name)
+        self._plate_detector = YOLO(f"{model_name}.pt")
+        return self._plate_detector
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -135,7 +161,8 @@ class VisionService:
         """Run the combined vision pipeline on a snapshot image.
 
         Performs vehicle detection and/or ANPR based on configuration.
-        Both features share the YOLO model when enabled simultaneously.
+        Vehicle detection uses a dedicated YOLO model; ANPR uses a
+        separate plate detector YOLO model with cropped OCR.
 
         Args:
             image_path: Path to the snapshot image file.
@@ -155,11 +182,26 @@ class VisionService:
         if not anpr_enabled and not detection_enabled:
             return result
 
-        # Run YOLO if either feature needs it
+        # Run vehicle YOLO only if vehicle detection is enabled
         yolo_detections = []
-        if anpr_enabled or detection_enabled:
+        if detection_enabled:
             yolo_detections = self._run_yolo(str(image_path))
             result.raw_detections = yolo_detections
+
+        # Run plate detection if ANPR is enabled
+        plate_detections: list[dict[str, Any]] = []
+        if anpr_enabled:
+            try:
+                plate_detector = self._load_plate_detector()
+                plate_results = plate_detector(str(image_path), verbose=False)
+                for det in plate_results[0].boxes:
+                    plate_detections.append({
+                        "class_name": plate_detector.names[int(det.cls)],
+                        "confidence": float(det.conf),
+                        "bbox": det.xyxy[0].tolist(),
+                    })
+            except Exception as exc:
+                logger.warning("plate_detection_failed", error=str(exc))
 
         # Extract vehicle type from YOLO results
         if detection_enabled:
@@ -168,10 +210,10 @@ class VisionService:
                 result.vehicle_type = vtype
                 result.vehicle_confidence = vconf
 
-        # Extract plate text via OCR
+        # Extract plate text via OCR (uses plate detections for cropping)
         if anpr_enabled:
             plate_text, plate_conf = self._extract_plate_number(
-                str(image_path), yolo_detections
+                str(image_path), plate_detections
             )
             if plate_conf >= self._settings.anpr_confidence_threshold:
                 result.plate_number = plate_text
@@ -226,73 +268,115 @@ class VisionService:
 
         return best_type, best_conf
 
-    def _extract_plate_number(
-        self, image_path: str, detections: list[dict[str, Any]]
-    ) -> tuple[str | None, float]:
-        """Extract plate number using OCR.
-
-        If YOLO detected a license plate region, crops to that region first.
-        Otherwise runs OCR on the full image.
-        """
-        import re
-
+    def _run_ocr(self, image_path: str) -> tuple[str | None, float]:
+        """Run OCR on an image and return concatenated text with average confidence."""
         ocr = self._load_ocr()
-
-        # Try to find plate region from YOLO (custom-trained models detect
-        # "license_plate"; stock COCO does not, so we fall back to full image)
-        plate_region = None
-        for det in detections:
-            if det["class_name"] in ("license_plate", "license-plate"):
-                plate_region = det["bbox"]
-                break
-
-        # Run OCR
         ocr_engine = self._settings.anpr_model
+
         if ocr_engine == "paddleocr":
             result = ocr.ocr(image_path, cls=True)
             if not result or not result[0]:
                 return None, 0.0
-
-            # Concatenate all high-confidence text and try to match plate pattern
             texts = []
-            avg_conf = 0.0
-            count = 0
+            total_conf = 0.0
             for line in result[0]:
-                text = line[1][0]
-                conf = line[1][1]
-                texts.append(text)
-                avg_conf += conf
-                count += 1
-
-            avg_conf = avg_conf / count if count > 0 else 0.0
-            full_text = " ".join(texts).upper()
+                texts.append(line[1][0])
+                total_conf += line[1][1]
+            avg_conf = total_conf / len(result[0]) if result[0] else 0.0
+            return " ".join(texts).upper(), avg_conf
 
         elif ocr_engine == "easyocr":
             result = ocr.readtext(image_path)
             if not result:
                 return None, 0.0
-
             texts = []
-            avg_conf = 0.0
-            count = 0
-            for bbox, text, conf in result:
+            total_conf = 0.0
+            for _bbox, text, conf in result:
                 texts.append(text)
-                avg_conf += conf
-                count += 1
-
-            avg_conf = avg_conf / count if count > 0 else 0.0
-            full_text = " ".join(texts).upper()
-        else:
-            return None, 0.0
-
-        # Indonesian plate pattern: 1-2 letters, 1-4 digits, 0-3 letters
-        plate_pattern = re.compile(r"[A-Z]{1,2}\s?\d{1,4}\s?[A-Z]{0,3}")
-        match = plate_pattern.search(full_text)
-
-        if match:
-            plate = match.group(0).replace(" ", " ").strip()
-            # Normalize: ensure spaces between sections
-            plate = re.sub(r"([A-Z]+)(\d+)([A-Z]*)", r"\1 \2 \3", plate).strip()
-            return plate, avg_conf
+                total_conf += conf
+            avg_conf = total_conf / len(result) if result else 0.0
+            return " ".join(texts).upper(), avg_conf
 
         return None, 0.0
+
+    def _extract_plate_number(
+        self, image_path: str, plate_detections: list[dict[str, Any]]
+    ) -> tuple[str | None, float]:
+        """Extract plate number by cropping detected plate region, then OCR.
+
+        If a plate detection with sufficient confidence is available, crops
+        to that bounding box before OCR.  Falls back to full-frame OCR if
+        no plate is detected.
+        """
+        # Try to crop to detected plate region
+        crop_bbox: list[float] | None = None
+        for det in plate_detections:
+            if det["confidence"] >= self._settings.anpr_confidence_threshold:
+                crop_bbox = det["bbox"]
+                break
+
+        # Run OCR on cropped region or full image
+        ocr_image_path = image_path
+        tmp_path: str | None = None
+        if crop_bbox is not None:
+            try:
+                from PIL import Image
+
+                img = Image.open(image_path)
+                cropped = img.crop(tuple(crop_bbox))
+                with tempfile.NamedTemporaryFile(
+                    suffix=".jpg", delete=False
+                ) as tmp:
+                    cropped.save(tmp.name, "JPEG", quality=95)
+                    ocr_image_path = tmp.name
+                    tmp_path = tmp.name
+                logger.info("plate_cropped_for_ocr", bbox=crop_bbox)
+            except Exception as exc:
+                logger.warning("plate_crop_failed", error=str(exc))
+                crop_bbox = None
+                ocr_image_path = image_path
+
+        try:
+            result = self._run_ocr(ocr_image_path)
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        if not result:
+            return None, 0.0
+
+        raw_text, avg_conf = result
+        plate = self._parse_indonesian_plate(raw_text)
+
+        return plate, avg_conf
+
+    @staticmethod
+    def _parse_indonesian_plate(text: str) -> str | None:
+        """Parse Indonesian plate number from OCR text with character constraints.
+
+        Format: 1-2 letters + 1-4 digits + 0-3 letters  (e.g. B 1234 ABC)
+        """
+        import re
+
+        # Strip non-alphanumeric, uppercase
+        cleaned = re.sub(r"[^A-Z0-9]", "", text.upper().strip())
+
+        if not cleaned:
+            return None
+
+        # Try Indonesian plate pattern
+        pattern = re.compile(r"([A-Z]{1,2})(\d{1,4})([A-Z]{0,3})")
+        match = pattern.search(cleaned)
+
+        if not match:
+            return None
+
+        prefix, digits, suffix = match.groups()
+        plate = f"{prefix} {digits}"
+        if suffix:
+            plate += f" {suffix}"
+
+        return plate
