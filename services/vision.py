@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -147,7 +148,7 @@ class VisionService:
             raise ImportError(
                 "ultralytics is required for plate detection. "
                 "Install with: pip install -e '.[vision]'"
-            )
+            ) from None
 
         logger.info("loading_plate_detector", model=model_name)
         self._plate_detector = YOLO(f"{model_name}.pt")
@@ -323,7 +324,10 @@ class VisionService:
                 from PIL import Image
 
                 img = Image.open(image_path)
-                cropped = img.crop(tuple(crop_bbox))
+                cropped = img.crop(
+                    (float(crop_bbox[0]), float(crop_bbox[1]),
+                     float(crop_bbox[2]), float(crop_bbox[3]))
+                )
                 with tempfile.NamedTemporaryFile(
                     suffix=".jpg", delete=False
                 ) as tmp:
@@ -340,10 +344,8 @@ class VisionService:
             result = self._run_ocr(ocr_image_path)
         finally:
             if tmp_path is not None:
-                try:
+                with suppress(Exception):
                     os.unlink(tmp_path)
-                except Exception:
-                    pass
 
         if not result:
             return None, 0.0
