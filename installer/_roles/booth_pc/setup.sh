@@ -24,24 +24,7 @@ PROJECT_ROOT="/opt/parking-system-v2"
 # Default to the origin of this checkout so the tech never types the URL.
 REPO_URL="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || echo "https://github.com/your-org/parking-system-v2.git")"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-
-step() {
-    echo ""
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
-}
+source "$SCRIPT_DIR/../common.sh"
 
 DO_INSTALL=true
 DO_CONFIGURE=true
