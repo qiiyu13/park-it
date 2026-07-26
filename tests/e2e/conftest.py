@@ -35,7 +35,7 @@ async def redis_client():
     settings = get_settings()
     client = aioredis.from_url(settings.redis_url, decode_responses=True)
     yield client
-    await client.close()
+    await client.aclose()
 
 
 class GateOrchestrator:

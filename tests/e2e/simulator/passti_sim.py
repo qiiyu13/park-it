@@ -6,11 +6,13 @@ Simulates PASSTI reader frame protocol:
 """
 
 import asyncio
-import logging
 
 from protocols.passti.frame import build_frame
+from shared.logging import get_logger
 
-logger = logging.getLogger("passti_sim")
+# structlog, not stdlib logging — see the note in controller_sim.py: the call
+# sites pass keyword context that stdlib Logger.info raises TypeError on.
+logger = get_logger("passti_sim")
 
 
 class PasstiSimulator:
