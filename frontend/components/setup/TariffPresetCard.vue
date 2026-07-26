@@ -34,7 +34,7 @@
 <script setup>
 import { useFormatters } from '~/composables/useFormatters'
 
-const props = defineProps({
+defineProps({
   preset: { type: Object, required: true },
   selected: { type: Boolean, default: false },
 })

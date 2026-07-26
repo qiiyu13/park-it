@@ -58,7 +58,7 @@
             :src="lastEntry.snapshotUrl"
             :alt="lastEntry.plateNumber || 'snapshot masuk'"
             class="h-full w-full object-cover"
-          />
+          >
           <div
             v-else
             class="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground/20"

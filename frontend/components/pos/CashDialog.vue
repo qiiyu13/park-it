@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" @keydown.esc="close" tabindex="-1">
+    <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" tabindex="-1" @keydown.esc="close">
       <div class="w-full max-w-3xl border-4 border-foreground bg-surface p-7 shadow-brutal-lg">
         <!-- Header -->
         <div class="flex items-baseline justify-between mb-1">
@@ -26,7 +26,7 @@
               placeholder="0"
               @keydown.enter.prevent="onConfirm"
               @keydown.esc.prevent="close"
-            />
+            >
             <div class="text-[11px] font-bold text-foreground/70 mt-1">ketik nominal · enter untuk lanjut</div>
           </div>
           <div class="border-2 border-foreground bg-background p-4 shadow-brutal" :class="{ 'opacity-50': paidAmount < tariff }">

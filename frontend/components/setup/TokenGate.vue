@@ -33,7 +33,7 @@ import { ref } from 'vue'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 
-const props = defineProps({
+defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })

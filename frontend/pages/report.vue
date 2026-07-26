@@ -11,9 +11,9 @@
         <Button size="sm" variant="outline" @click="setLastMonth">Bulan Lalu</Button>
       </div>
       <div class="flex items-center gap-3">
-        <input v-model="dateFrom" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" />
+        <input v-model="dateFrom" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
         <span class="font-bold text-foreground">s/d</span>
-        <input v-model="dateTo" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" />
+        <input v-model="dateTo" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
         <Button size="sm" :disabled="loading" @click="loadReports">Tampilkan</Button>
       </div>
     </div>

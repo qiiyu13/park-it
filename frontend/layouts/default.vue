@@ -65,7 +65,8 @@
         <h1 class="text-lg font-black uppercase tracking-wide text-foreground">{{ pageTitle }}</h1>
         <div class="flex items-center gap-4">
           <span class="font-mono text-sm font-bold text-foreground">{{ clock }}</span>
-          <span :class="[
+          <span
+:class="[
             'border-2 border-foreground px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm',
             authStore.isAdmin ? 'bg-destructive text-white' : 'bg-primary text-foreground',
           ]">

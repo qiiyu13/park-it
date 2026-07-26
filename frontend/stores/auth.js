@@ -82,7 +82,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     try {
       await fetchApi('/api/auth/logout', { method: 'POST' })
-    } catch (err) {
+    } catch {
       // Ignore logout errors
     } finally {
       user.value = null
@@ -98,7 +98,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await fetchApi('/api/auth/refresh', { method: 'POST' })
       return true
-    } catch (err) {
+    } catch {
       user.value = devFallbackUser()
       return false
     }

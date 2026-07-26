@@ -1,15 +1,3 @@
-<script setup>
-definePageMeta({
-  middleware: [
-    function (to, from) {
-      if (process.env.NODE_ENV === 'production') {
-        return navigateTo('/')
-      }
-    }
-  ]
-})
-</script>
-
 <template>
   <div class="p-8 space-y-4">
     <h1 class="text-2xl font-bold">POS Test Page</h1>
@@ -61,6 +49,17 @@ definePageMeta({
 </template>
 
 <script setup>
+// Dev-only fixture page — redirect away in production builds.
+definePageMeta({
+  middleware: [
+    function () {
+      if (import.meta.env.PROD) {
+        return navigateTo('/')
+      }
+    },
+  ],
+})
+
 const gateStore = useGateStore()
 
 function simulateActiveTransaction() {

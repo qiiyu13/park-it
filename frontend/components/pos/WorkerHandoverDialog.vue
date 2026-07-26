@@ -20,12 +20,12 @@
             <span class="sketch-stepper-dot" :class="stepClass(0)">{{ stepIdx > 0 ? '✓' : '1' }}</span>
             <span class="font-hand-tight text-sm" :class="stepIdx === 0 ? '' : 'text-sketch-muted'">Petugas keluar</span>
           </div>
-          <span class="flex-1 h-px border-t border-dashed border-[color:var(--color-sketch-ink)]/50"></span>
+          <span class="flex-1 h-px border-t border-dashed border-[color:var(--color-sketch-ink)]/50"/>
           <div class="flex items-center gap-2">
             <span class="sketch-stepper-dot" :class="stepClass(1)">{{ stepIdx > 1 ? '✓' : '2' }}</span>
             <span class="font-hand-tight text-sm" :class="stepIdx === 1 ? '' : 'text-sketch-muted'">Petugas masuk</span>
           </div>
-          <span class="flex-1 h-px border-t border-dashed border-[color:var(--color-sketch-ink)]/50"></span>
+          <span class="flex-1 h-px border-t border-dashed border-[color:var(--color-sketch-ink)]/50"/>
           <div class="flex items-center gap-2">
             <span class="sketch-stepper-dot" :class="stepClass(2)">{{ stepIdx > 2 ? '✓' : '3' }}</span>
             <span class="font-hand-tight text-sm" :class="stepIdx === 2 ? '' : 'text-sketch-muted'">Konfirmasi tutup kas</span>
@@ -40,18 +40,21 @@
           </div>
           <div class="text-[11px] uppercase tracking-widest font-hand-tight text-sketch-muted mb-2">PIN ANDA</div>
           <div class="flex gap-2 mb-4">
-            <div v-for="i in 4" :key="i" class="sketch-pin-box"
+            <div
+v-for="i in 4" :key="i" class="sketch-pin-box"
               :class="{ 'is-filled': outgoingPin.length >= i, 'is-current': outgoingPin.length === i - 1 }">
               {{ outgoingPin[i - 1] ? '•' : (outgoingPin.length === i - 1 ? '|' : '') }}
             </div>
-            <input ref="outgoingPinInput" v-model="outgoingPin" type="password" inputmode="numeric"
-              maxlength="4" class="sr-only" @keydown.enter="submitOutgoing" />
+            <input
+ref="outgoingPinInput" v-model="outgoingPin" type="password" inputmode="numeric"
+              maxlength="4" class="sr-only" @keydown.enter="submitOutgoing" >
           </div>
 
           <div v-if="earlyLeave" class="mb-4">
             <div class="text-[11px] uppercase tracking-widest font-hand-tight text-sketch-muted mb-1">ALASAN PERGI LEBIH AWAL</div>
-            <input v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
-              class="sketch-input w-full px-3 py-2 font-hand-body" />
+            <input
+v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
+              class="sketch-input w-full px-3 py-2 font-hand-body" >
           </div>
         </template>
 
@@ -90,12 +93,14 @@
               PIN {{ (incomingWorker.full_name || incomingWorker.username).toUpperCase() }}
             </div>
             <div class="flex gap-2 mb-4">
-              <div v-for="i in 4" :key="i" class="sketch-pin-box"
+              <div
+v-for="i in 4" :key="i" class="sketch-pin-box"
                 :class="{ 'is-filled': incomingPin.length >= i, 'is-current': incomingPin.length === i - 1 }">
                 {{ incomingPin[i - 1] ? '•' : (incomingPin.length === i - 1 ? '|' : '') }}
               </div>
-              <input ref="incomingPinInput" v-model="incomingPin" type="password" inputmode="numeric"
-                maxlength="4" class="sr-only" @keydown.enter="submitIncoming" />
+              <input
+ref="incomingPinInput" v-model="incomingPin" type="password" inputmode="numeric"
+                maxlength="4" class="sr-only" @keydown.enter="submitIncoming" >
             </div>
           </div>
         </template>
@@ -107,19 +112,22 @@
           </p>
           <div class="mb-3">
             <div class="text-[11px] uppercase tracking-widest font-hand-tight text-sketch-muted mb-1">ALASAN (WAJIB)</div>
-            <input v-model="forceLeaveReason" type="text" maxlength="255"
+            <input
+v-model="forceLeaveReason" type="text" maxlength="255"
               placeholder="darurat keluarga, sakit mendadak..."
-              class="sketch-input w-full px-3 py-2 font-hand-body" />
+              class="sketch-input w-full px-3 py-2 font-hand-body" >
           </div>
           <div class="mb-4">
             <div class="text-[11px] uppercase tracking-widest font-hand-tight text-sketch-muted mb-1">KONFIRMASI PIN ANDA</div>
             <div class="flex gap-2">
-              <div v-for="i in 4" :key="i" class="sketch-pin-box"
+              <div
+v-for="i in 4" :key="i" class="sketch-pin-box"
                 :class="{ 'is-filled': forcePin.length >= i, 'is-current': forcePin.length === i - 1 }">
                 {{ forcePin[i - 1] ? '•' : (forcePin.length === i - 1 ? '|' : '') }}
               </div>
-              <input ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
-                maxlength="4" class="sr-only" @keydown.enter="submitForceLeave" />
+              <input
+ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
+                maxlength="4" class="sr-only" @keydown.enter="submitForceLeave" >
             </div>
           </div>
         </template>
@@ -179,7 +187,7 @@
             <span><span class="sketch-chip px-1.5 py-0">Esc</span> Batal</span>
           </div>
           <div class="flex items-center gap-1 font-hand-body text-xs text-sketch-muted">
-            <span class="inline-block w-2 h-2 rounded-full bg-[color:var(--color-sketch-highlight)]"></span>
+            <span class="inline-block w-2 h-2 rounded-full bg-[color:var(--color-sketch-highlight)]"/>
             Serah-terima shift · langkah {{ stepIdx + 1 }} dari 3
           </div>
         </div>

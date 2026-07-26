@@ -11,7 +11,7 @@ let cachedComplete = null
 let inflight = null
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  if (process.server) return
+  if (import.meta.server) return
   if (to.path.startsWith('/setup')) return
 
   if (cachedComplete === null) {

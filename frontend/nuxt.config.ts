@@ -27,6 +27,7 @@ export default defineNuxtConfig({
   modules: [
     '@pinia/nuxt',
     'shadcn-nuxt',
+    '@nuxt/eslint',
   ],
 
   // Pinia

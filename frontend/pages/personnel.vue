@@ -55,7 +55,7 @@
                   class="w-20 rounded border border-border bg-surface px-2 py-1 text-center font-mono text-sm text-foreground focus:border-primary focus:outline-none"
                   @keydown.enter="savePin(user.id)"
                   @keydown.escape="cancelPinEdit"
-                />
+                >
                 <button
                   :disabled="pinValue.length < 4 || savingPin"
                   class="rounded bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-40"
@@ -117,11 +117,11 @@
         <div class="space-y-3">
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Username</label>
-            <input v-model="form.username" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" />
+            <input v-model="form.username" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Nama Lengkap</label>
-            <input v-model="form.full_name" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" />
+            <input v-model="form.full_name" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Role</label>
@@ -135,15 +135,15 @@
             <label class="block text-xs font-medium text-muted-foreground mb-1">
               {{ editingUser ? 'Password Baru (kosongkan jika tidak diubah)' : 'Password' }}
             </label>
-            <input v-model="form.password" type="password" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" />
+            <input v-model="form.password" type="password" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Telepon</label>
-            <input v-model="form.phone" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" />
+            <input v-model="form.phone" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
           </div>
           <div>
             <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground">
-              <input v-model="form.is_active" type="checkbox" class="accent-primary" />
+              <input v-model="form.is_active" type="checkbox" class="accent-primary" >
               Akun aktif
             </label>
           </div>

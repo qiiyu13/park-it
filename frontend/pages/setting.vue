@@ -55,7 +55,7 @@
           <div class="px-3 py-2 font-mono text-sm font-bold text-foreground">{{ row.key }}</div>
           <div class="px-3 py-2 text-sm font-medium text-foreground">{{ row.label }}</div>
           <div class="px-3 py-2">
-            <input v-model="row.value" class="w-full border-2 border-foreground bg-background px-2 py-1 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[1px] focus:translate-y-[1px] transition-all duration-100" @blur="saveSetting(row)" />
+            <input v-model="row.value" class="w-full border-2 border-foreground bg-background px-2 py-1 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[1px] focus:translate-y-[1px] transition-all duration-100" @blur="saveSetting(row)" >
           </div>
           <div class="px-3 py-2">
             <span class="border-2 border-foreground bg-muted px-1.5 py-0.5 text-xs font-bold uppercase text-muted-foreground shadow-brutal-sm">{{ row.group }}</span>
@@ -106,7 +106,8 @@
               <td class="px-3 py-2 font-bold text-foreground">{{ gate.name }}</td>
               <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{{ gate.code }}</td>
               <td class="px-3 py-2">
-                <span :class="[
+                <span
+:class="[
                   'border-2 border-foreground px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm',
                   gate.hardware_config?.lane_type === 'SINGLE' ? 'bg-primary text-foreground' : 'bg-warning text-foreground'
                 ]">
@@ -135,7 +136,7 @@
             <label class="text-sm font-bold uppercase tracking-wide text-foreground">Jenis Lajur</label>
             <div class="flex gap-3">
               <label v-for="opt in laneTypeOptions" :key="opt.value" class="flex items-center gap-2 cursor-pointer">
-                <input type="radio" :value="opt.value" v-model="gateLaneForm.lane_type" class="accent-primary" />
+                <input v-model="gateLaneForm.lane_type" type="radio" :value="opt.value" class="accent-primary" >
                 <span class="text-sm font-medium text-foreground">{{ opt.label }}</span>
               </label>
             </div>
@@ -323,7 +324,7 @@ async function loadGates() {
 
 onMounted(() => { loadSiteConfig(); loadSettings(); loadVehicleTypes(); loadShifts(); loadAreas(); loadGates() })
 
-async function loadSiteConfig() { try { const { data } = await fetchApi('/api/site-config'); siteConfig.value = data } catch (e) { /* ok */ } }
+async function loadSiteConfig() { try { const { data } = await fetchApi('/api/site-config'); siteConfig.value = data } catch { /* ok */ } }
 async function saveSiteConfig() {
   try {
     await fetchApi('/api/site-config', { method: 'PUT', body: JSON.stringify(siteConfig.value) })

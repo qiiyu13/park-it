@@ -6,13 +6,13 @@
         <div class="text-xs uppercase tracking-[0.2em] font-hand-tight text-sketch-muted">BLOCKING · SEBELUM TRANSAKSI</div>
         <h2 class="font-hand text-4xl mt-1 leading-none">Belum ada petugas</h2>
         <p class="font-hand-body text-sm text-sketch-muted mt-2">pilih nama Anda lalu masukkan PIN untuk mulai shift.</p>
-        <div class="sketch-divider my-4"></div>
+        <div class="sketch-divider my-4"/>
 
         <!-- Worker tiles -->
         <div class="text-[11px] uppercase tracking-widest font-hand-tight text-sketch-muted mb-2">PETUGAS</div>
         <div class="grid grid-cols-5 gap-2 mb-5">
           <button
-            v-for="(worker, idx) in workers"
+            v-for="worker in workers"
             :key="worker.id"
             class="sketch-tile px-3 py-3 text-left"
             :class="{ 'is-active': selectedWorker?.id === worker.id }"
@@ -48,7 +48,7 @@
             maxlength="4"
             class="sr-only"
             @keydown.enter="submit"
-          />
+          >
           <div class="ml-auto text-xs font-hand-body text-sketch-muted">
             <span v-if="errorMsg" class="text-[color:var(--color-sketch-accent-red)]">{{ errorMsg }}</span>
             <span v-else>salah PIN? hubungi supervisor</span>
@@ -58,7 +58,7 @@
         <!-- Substitute toggle -->
         <div class="flex items-center gap-3 mb-4">
           <label class="flex items-center gap-2 cursor-pointer font-hand-body text-sm">
-            <input v-model="isSubstitute" type="checkbox" class="accent-[color:var(--color-sketch-ink)]" />
+            <input v-model="isSubstitute" type="checkbox" class="accent-[color:var(--color-sketch-ink)]" >
             Saya menggantikan petugas lain
           </label>
           <select
@@ -94,7 +94,7 @@
             <span><span class="sketch-chip px-1.5 py-0">Enter</span> Masuk Shift</span>
           </div>
           <div class="flex items-center gap-1 font-hand-body text-xs text-sketch-muted">
-            <span class="inline-block w-2 h-2 rounded-full bg-[color:var(--color-sketch-accent-red)]"></span>
+            <span class="inline-block w-2 h-2 rounded-full bg-[color:var(--color-sketch-accent-red)]"/>
             Booth belum di check-in
           </div>
         </div>

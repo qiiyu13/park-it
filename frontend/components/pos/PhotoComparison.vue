@@ -11,7 +11,7 @@
         alt="Foto Masuk"
         class="h-full w-full object-cover"
         @error="$event.target.style.display = 'none'"
-      />
+      >
       <div v-else class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/30">
         <Camera class="h-8 w-8" />
         <span class="text-xs font-medium">Foto Masuk</span>
@@ -33,7 +33,7 @@
         alt="Foto Keluar"
         class="h-full w-full object-cover"
         @error="$event.target.style.display = 'none'"
-      />
+      >
       <div v-else class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/30">
         <Camera class="h-8 w-8" />
         <span class="text-xs font-medium">Foto Keluar</span>
@@ -49,7 +49,7 @@
         <img
           :src="fullscreenPhoto === 'entry' ? entryPhotoUrl : exitPhotoUrl"
           class="w-full rounded-lg"
-        />
+        >
       </DialogContent>
     </Dialog>
   </div>

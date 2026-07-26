@@ -17,7 +17,7 @@
       </div>
 
       <!-- Form -->
-      <form @submit.prevent="handleLogin" class="space-y-4">
+      <form class="space-y-4" @submit.prevent="handleLogin">
         <div class="space-y-2">
           <label class="text-sm font-bold uppercase tracking-wide text-foreground">Username</label>
           <Input
@@ -96,7 +96,7 @@ async function handleLogin() {
   try {
     await authStore.login(form.username, form.password)
     router.push(authStore.isAdmin ? '/' : '/pos')
-  } catch (err) {
+  } catch {
     // Error is stored in authStore.error
   }
 }

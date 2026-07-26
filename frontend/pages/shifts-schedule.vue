@@ -12,7 +12,7 @@
         type="date"
         class="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
         @change="loadData"
-      />
+      >
       <button class="rounded-md border border-border bg-surface px-2 py-1.5 text-sm hover:bg-surface-hover" @click="changeDate(1)">→</button>
       <button class="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:bg-surface-hover" @click="goToday">Hari ini</button>
       <span class="text-sm text-muted-foreground">{{ formattedDay }}</span>
@@ -195,7 +195,7 @@
           </div>
           <div>
             <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground">
-              <input v-model="assignmentForm.is_substitute" type="checkbox" class="accent-primary" />
+              <input v-model="assignmentForm.is_substitute" type="checkbox" class="accent-primary" >
               Penugasan pengganti
             </label>
           </div>
@@ -216,7 +216,7 @@
               type="text"
               maxlength="255"
               class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-            />
+            >
           </div>
         </div>
 
@@ -252,7 +252,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 definePageMeta({ middleware: 'auth' })
 
 const { fetchApi } = useApi()
-const authStore = useAuthStore()
 
 const tabs = [
   { key: 'assignments', label: 'Jadwal Penugasan' },

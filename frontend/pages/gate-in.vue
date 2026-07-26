@@ -14,7 +14,8 @@
         <!-- Header -->
         <div class="mb-3 flex items-center justify-between">
           <span class="font-semibold text-foreground">{{ gate.name }}</span>
-          <span :class="[
+          <span
+:class="[
             'rounded-full px-2 py-0.5 text-xs font-medium',
             stateTagClass(gate.code),
           ]">
@@ -25,7 +26,8 @@
         <!-- Status -->
         <div class="mb-3 space-y-2">
           <div class="flex items-center gap-2">
-            <span :class="[
+            <span
+:class="[
               'h-2 w-2 rounded-full',
               wsConnected(gate.code) ? 'bg-green-500 animate-pulse' : 'bg-red-500',
             ]" />

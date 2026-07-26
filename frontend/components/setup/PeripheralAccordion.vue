@@ -7,7 +7,7 @@
           :checked="enabled"
           class="h-4 w-4 accent-primary"
           @change="$emit('update:enabled', $event.target.checked)"
-        />
+        >
         <span class="text-sm font-medium text-foreground">{{ title }}</span>
       </label>
       <button

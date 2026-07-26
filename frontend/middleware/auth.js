@@ -26,7 +26,7 @@ function isAdminOnly(path) {
     .some((p) => path === p || path.startsWith(p + '/'))
 }
 
-export default defineNuxtRouteMiddleware(async (to, from) => {
+export default defineNuxtRouteMiddleware(async (to) => {
   const authStore = useAuthStore()
 
   const publicRoutes = ['/login']

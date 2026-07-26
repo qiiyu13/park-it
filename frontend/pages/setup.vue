@@ -174,7 +174,7 @@
               <td class="px-3 py-2"><Input v-model.number="item.hourly_rate" type="number" min="0" class="h-8 text-right" /></td>
               <td class="px-3 py-2"><Input v-model.number="item.max_daily_cap" type="number" min="0" class="h-8 text-right" /></td>
               <td class="px-3 py-2 text-center">
-                <input type="checkbox" v-model="item.is_progressive" class="h-4 w-4 accent-primary" />
+                <input v-model="item.is_progressive" type="checkbox" class="h-4 w-4 accent-primary" >
               </td>
               <td class="px-3 py-2 text-right">
                 <Button variant="ghost" size="sm" @click="removeTariffItem(idx)">Hapus</Button>
@@ -259,7 +259,7 @@
       </div>
 
       <label class="flex items-center gap-2 text-sm text-foreground">
-        <input type="checkbox" v-model="form.topology.include_local_serial" class="h-4 w-4 accent-primary" />
+        <input v-model="form.topology.include_local_serial" type="checkbox" class="h-4 w-4 accent-primary" >
         Jalankan daemon gate lokal di mesin ini (combo PC).
       </label>
     </section>

@@ -27,7 +27,7 @@
           :alt="cam.label || `Kamera ${i + 1}`"
           class="w-full h-full object-cover"
           @error="imgErrors[i] = true"
-        />
+        >
         <div
           v-else
           class="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground/20"

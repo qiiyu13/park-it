@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useKeyboard } from '~/composables/useKeyboard'
 import { useFormatters } from '~/composables/useFormatters'
 
@@ -137,7 +137,6 @@ definePageMeta({
   layout: false,
 })
 
-const authStore = useAuthStore()
 const websiteStore = useWebsiteStore()
 const gateStore = useGateStore()
 const posSession = usePosSessionStore()
@@ -179,7 +178,6 @@ const showCashDialog = ref(false)
 const showRfidDialog = ref(false)
 const emoneyBalance = ref(null)
 const isPaymentProcessing = ref(false)
-const recentTransactions = ref([])
 const lastEntry = ref(null)
 
 // View state (priority: GATE_OPEN > ERROR > UNIFIED)
@@ -308,14 +306,6 @@ const activeVehicleTypeName = computed(() => {
   if (!activeVehicleTypeId.value) return null
   return websiteStore.vehicleTypes.find((t) => t.id === activeVehicleTypeId.value)?.name || null
 })
-
-const entryPhotoUrl = computed(() => {
-  const tx = gateStore.currentTransaction
-  if (!tx?.entry_snapshot_id) return null
-  return `/api/snapshots/${tx.entry_snapshot_id}/image`
-})
-
-const exitPhotoUrl = computed(() => gateStore.cameraSnapshot)
 
 const emoneyCardInfo = computed(() => {
   const tx = gateStore.currentTransaction
@@ -541,7 +531,7 @@ function vehicleLeftAction() {
 // Booth bridge connection
 function connectBooth() {
   if (boothWs) {
-    try { boothWs.close() } catch (e) { /* ignore */ }
+    try { boothWs.close() } catch { /* ignore */ }
   }
 
   if (boothWsReconnectAttempts >= BOOTH_MAX_RECONNECT_ATTEMPTS) {
@@ -589,7 +579,7 @@ function disconnectBooth() {
     boothWsReconnectTimer = null
   }
   if (boothWs) {
-    try { boothWs.close() } catch (e) { /* ignore */ }
+    try { boothWs.close() } catch { /* ignore */ }
     boothWs = null
   }
   gateStore.setBoothConnected(false)
