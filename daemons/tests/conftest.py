@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
-import pytest_asyncio
 import redis.asyncio as aioredis
 
 
@@ -88,20 +86,6 @@ def fake_redis() -> FakeRedis:
     return FakeRedis()
 
 
-@pytest_asyncio.fixture
-async def daemon_lifecycle() -> AsyncGenerator[Any, None]:
-    """Provide helper for managing daemon lifecycle in tests."""
-    active_daemons: list[Any] = []
-
-    def register(daemon: Any) -> None:
-        active_daemons.append(daemon)
-
-    yield register
-
-    for daemon in active_daemons:
-        await daemon.stop()
-
-
 @pytest.fixture
 def gate_in_config() -> dict[str, Any]:
     """Sample gate-in configuration."""
@@ -120,71 +104,5 @@ def gate_in_config() -> dict[str, Any]:
         "relay_mode": "SINGLE",
         "camera_url": "http://192.168.1.50/snapshot",
     }
-
-
-
-class MockCompassTransport:
-    """Mock Compass TCP transport for testing."""
-
-    def __init__(self) -> None:
-        self.sent_commands: list[bytes] = []
-        self._responses: list[bytes] = []
-        self._response_index = 0
-        self._connected = False
-
-    def connect(self, timeout: float = 5.0) -> None:
-        self._connected = True
-
-    def close(self) -> None:
-        self._connected = False
-
-    def send(self, command: bytes) -> None:
-        self.sent_commands.append(command)
-
-    def send_recv(self, command: bytes, timeout: float = 1.0) -> bytes:
-        self.sent_commands.append(command)
-        if self._response_index < len(self._responses):
-            resp = self._responses[self._response_index]
-            self._response_index += 1
-            self._last_response = resp
-            return resp
-        # Repeat last response if available, otherwise empty
-        return getattr(self, "_last_response", b"")
-
-    def is_connected(self) -> bool:
-        return self._connected
-
-    def inject_response(self, response: bytes) -> None:
-        self._responses.append(response)
-
-    def inject_stat_in1_on(self) -> None:
-        """Inject STAT response with IN1 ON."""
-        self._responses.append(b"\xa6STAT10IN2OFF\xa9")
-
-    def inject_stat_in2_on(self) -> None:
-        """Inject STAT response with IN2 ON."""
-        self._responses.append(b"\xa6STAT1IN1OFF\xa9")
-
-    def inject_stat_wiegand_w(self, card_hex: str) -> None:
-        """Inject STAT response with Wiegand W data."""
-        resp = f"\xa6STAT1W{card_hex}\xa9".encode()
-        self._responses.append(resp)
-
-    def inject_stat_empty(self) -> None:
-        """Inject empty STAT response."""
-        self._responses.append(b"\xa6STAT0IN1OFFIN2OFF\xa9")
-
-    def reset(self) -> None:
-        self.sent_commands.clear()
-        self._responses.clear()
-        self._response_index = 0
-
-
-@pytest.fixture
-def mock_compass() -> MockCompassTransport:
-    """Return a fresh MockCompassTransport (pre-connected)."""
-    transport = MockCompassTransport()
-    transport.connect()
-    return transport
 
 

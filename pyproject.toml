@@ -165,12 +165,6 @@ disable_error_code = ["operator"]
 module = "scripts.*"
 disable_error_code = ["call-arg", "index"]
 
-# Pre-refactor daemon tests, skipped at runtime pending a rewrite against the
-# WAITING_INPUT machine — they reference attributes the daemon no longer has.
-[[tool.mypy.overrides]]
-module = "daemons.tests.test_gate_in"
-disable_error_code = ["attr-defined"]
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # booth_bridge/tests and tests/ were omitted here, so 56 tests — the entire exit
