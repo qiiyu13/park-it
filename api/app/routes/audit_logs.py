@@ -1,14 +1,12 @@
 """Audit log routes (admin-only)."""
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import require_admin
 from api.app.models.audit_log import AuditLog
-from api.app.utils.pagination import PaginationParams, paginated_list
+from api.app.utils.pagination import PaginatedList, PaginationParams, paginated_list
 from api.database import get_db
 
 router = APIRouter(prefix="/audit-logs", tags=["Audit Logs"])
@@ -22,7 +20,7 @@ async def list_audit_logs(
     action: str | None = None,
     user_id: int | None = None,
     entity_type: str | None = None,
-) -> dict[str, Any]:
+) -> PaginatedList:
     """List audit logs with optional filtering.
 
     Admin only.
@@ -36,4 +34,4 @@ async def list_audit_logs(
     if entity_type:
         query = query.where(AuditLog.entity_type == entity_type)
 
-    return await paginated_list(db, query, pagination)
+    return await paginated_list(db, query, skip=pagination.skip, limit=pagination.limit)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.app.routes.audit_logs import list_audit_logs
 from api.app.services.audit import log_action
+from api.app.utils.pagination import PaginationParams
 
 
 class TestLogAction:
@@ -56,3 +58,41 @@ class TestLogAction:
 
         assert log is not None
         assert log.details == {}
+
+
+class TestListAuditLogsRoute:
+    """The list route was passing `pagination` positionally into `count_stmt`.
+
+    SQLAlchemy then tried to execute a PaginationParams model, so GET
+    /api/audit-logs raised for every caller. No test reached the handler —
+    the smoke test only asserts the route is not 404 and stops at the 401.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_returns_logs(self, db_session: AsyncSession):
+        await log_action(db_session, action="LIST_ME", entity_type="Widget")
+
+        result = await list_audit_logs(
+            request=None,
+            db=db_session,
+            pagination=PaginationParams(skip=0, limit=10),
+        )
+
+        assert result.total >= 1
+        assert any(item.action == "LIST_ME" for item in result.items)
+
+    @pytest.mark.asyncio
+    async def test_list_honors_pagination_and_filter(self, db_session: AsyncSession):
+        for i in range(3):
+            await log_action(db_session, action="PAGED", entity_type=f"E{i}")
+
+        page = await list_audit_logs(
+            request=None,
+            db=db_session,
+            pagination=PaginationParams(skip=0, limit=2),
+            action="PAGED",
+        )
+
+        assert len(page.items) == 2, "limit was ignored — pagination not wired through"
+        assert page.total >= 3
+        assert all(item.action == "PAGED" for item in page.items)
