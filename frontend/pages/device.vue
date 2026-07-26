@@ -290,7 +290,7 @@ const gateFields = computed(() => {
           { prop: 'controller_baudrate', label: 'Baudrate', type: 'number', placeholder: '9600' },
         ]
       : [
-          { prop: 'controller_host', label: 'Host Controller', type: 'text', placeholder: '192.168.1.x', required: true },
+          { prop: 'controller_host', label: 'Host Controller', type: 'ip-scan', portProp: 'controller_port', placeholder: '192.168.1.x', required: true },
           { prop: 'controller_port', label: 'Port Controller', type: 'number', placeholder: '4001', required: true },
         ]
     ),

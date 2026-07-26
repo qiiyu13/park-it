@@ -12,9 +12,12 @@ Authentication model:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import ipaddress
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +34,9 @@ from api.app.schemas.setup import (
     CreateAdminRequest,
     DetectSerialCandidate,
     DetectSerialResponse,
+    DiscoverGateCandidate,
+    DiscoverGatesRequest,
+    DiscoverGatesResponse,
     EnrollRequest,
     EnrollResponse,
     FinalizeResponse,
@@ -451,6 +457,74 @@ async def test_device(
             error=stderr.decode("utf-8", errors="ignore").strip() or "probe returned non-JSON",
         )
     return TestDeviceResponse(**payload)
+
+
+def _confirm_compass(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Blocking STAT probe — confirms the open port is actually a Compass
+    controller, not some other device that happens to listen on 5000."""
+    from protocols.compass.protocol import CompassTransport, cmd_stat
+
+    transport = CompassTransport(host, port)
+    try:
+        transport.connect(timeout=timeout)
+        return len(transport.send_recv(cmd_stat(), timeout=timeout)) > 0
+    except OSError:
+        return False
+    finally:
+        transport.close()
+
+
+async def _scan_subnet(
+    network: ipaddress.IPv4Network, port: int, *, connect_timeout: float = 0.3, concurrency: int = 64
+) -> list[DiscoverGateCandidate]:
+    """Concurrent TCP-open scan of every host in `network`, then a blocking
+    STAT confirm on each hit. Bare open_connection (not subprocess-per-IP
+    like test-device) since a /24 is 254 probes — subprocess doesn't scale."""
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _probe(host: str) -> tuple[str, float] | None:
+        async with sem:
+            start = time.perf_counter()
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port), timeout=connect_timeout
+                )
+            except (OSError, TimeoutError):
+                return None
+            latency = (time.perf_counter() - start) * 1000
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return host, latency
+
+    hits = [r for r in await asyncio.gather(*(_probe(str(ip)) for ip in network.hosts())) if r]
+
+    loop = asyncio.get_event_loop()
+    return [
+        DiscoverGateCandidate(
+            host=host,
+            latency_ms=round(latency, 2),
+            confirmed=await loop.run_in_executor(None, _confirm_compass, host, port),
+        )
+        for host, latency in hits
+    ]
+
+
+@router.post("/discover-gates", response_model=DiscoverGatesResponse)
+async def discover_gates(
+    body: DiscoverGatesRequest,
+    auth=Depends(require_setup_or_admin),
+) -> DiscoverGatesResponse:
+    """Scan a LAN subnet for open Compass controller ports, then confirm via STAT."""
+    try:
+        network = ipaddress.ip_network(body.subnet, strict=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid subnet: {exc}")
+    if network.num_addresses > 256:
+        raise HTTPException(status_code=400, detail="subnet too large — max /24")
+
+    candidates = await _scan_subnet(network, body.port)
+    return DiscoverGatesResponse(candidates=candidates)
 
 
 async def _wait_event(channel: str, want_type: str, timeout: float) -> tuple[bool, float, str | None]:

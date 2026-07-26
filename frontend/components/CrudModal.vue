@@ -5,7 +5,7 @@
         <DialogTitle>{{ title }}</DialogTitle>
       </DialogHeader>
 
-      <form @submit.prevent="handleSubmit" class="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
+      <form class="space-y-6 max-h-[60vh] overflow-y-auto pr-1" @submit.prevent="handleSubmit">
         <fieldset
           v-for="(group, gIdx) in groups"
           :key="group.title || gIdx"
@@ -77,6 +77,40 @@
               <span class="text-sm font-bold uppercase text-foreground">
                 {{ formData[field.prop] ? 'Ya' : 'Tidak' }}
               </span>
+            </div>
+
+            <!-- IP scan (TCP host with LAN discovery button) -->
+            <div v-else-if="field.type === 'ip-scan'" class="space-y-1">
+              <div class="flex gap-2">
+                <select
+                  v-if="ipScanResults[field.prop]?.length"
+                  class="w-40 rounded-md border border-border bg-background px-2 py-2 text-xs font-mono"
+                  @change="(e) => { formData[field.prop] = e.target.value }"
+                >
+                  <option value="">— hasil scan —</option>
+                  <option v-for="c in ipScanResults[field.prop]" :key="c.host" :value="c.host">
+                    {{ c.host }}{{ c.confirmed ? ' ✓' : '' }} · {{ Math.round(c.latency_ms) }}ms
+                  </option>
+                </select>
+                <Input
+                  v-model="formData[field.prop]"
+                  :placeholder="field.placeholder || ''"
+                  :disabled="field.disabled"
+                  class="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="ipScanning[field.prop]"
+                  @click="scanIpField(field)"
+                >
+                  {{ ipScanning[field.prop] ? 'Memindai…' : 'Scan LAN' }}
+                </Button>
+              </div>
+              <p v-if="ipScanError[field.prop]" class="text-xs text-destructive">
+                {{ ipScanError[field.prop] }}
+              </p>
             </div>
 
             <!-- Time -->
@@ -154,6 +188,34 @@ const flatFields = computed(() => groups.value.flatMap((g) => g.items))
 
 const formData = reactive({})
 const errors = reactive({})
+const ipScanning = reactive({})
+const ipScanResults = reactive({})
+const ipScanError = reactive({})
+
+const { fetchApi } = useApi()
+
+async function scanIpField(field) {
+  ipScanning[field.prop] = true
+  ipScanError[field.prop] = ''
+  ipScanResults[field.prop] = []
+  try {
+    const octets = (formData[field.prop] || '').split('.')
+    const prefix = octets.length === 4 ? octets.slice(0, 3).join('.') : '192.168.1'
+    const port = (field.portProp && Number(formData[field.portProp])) || 5000
+    const res = await fetchApi('/api/setup/discover-gates', {
+      method: 'POST',
+      body: JSON.stringify({ subnet: `${prefix}.0/24`, port }),
+    })
+    ipScanResults[field.prop] = res.candidates || []
+    if (!ipScanResults[field.prop].length) {
+      ipScanError[field.prop] = `Tidak ada controller ditemukan di ${prefix}.0/24 — cek kabel LAN atau isi IP manual.`
+    }
+  } catch (err) {
+    ipScanError[field.prop] = `Gagal scan: ${err.message}`
+  } finally {
+    ipScanning[field.prop] = false
+  }
+}
 
 watch(
   () => props.modelValue,

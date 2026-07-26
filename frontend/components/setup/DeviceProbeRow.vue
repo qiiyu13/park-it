@@ -71,11 +71,26 @@
 
     <div v-else class="flex flex-wrap items-end gap-2">
       <WizardField label="Host / IP" class="flex-1 min-w-[200px]">
-        <Input v-model="localHost" placeholder="192.168.1.100" @blur="emitUpdate" />
+        <div class="flex gap-2">
+          <select
+            v-if="scanCandidates.length"
+            class="w-40 rounded-md border border-border bg-background px-2 py-2 text-xs font-mono"
+            @change="(e) => { localHost = e.target.value; emitUpdate() }"
+          >
+            <option value="">— hasil scan —</option>
+            <option v-for="c in scanCandidates" :key="c.host" :value="c.host">
+              {{ c.host }}{{ c.confirmed ? ' ✓' : '' }} · {{ Math.round(c.latency_ms) }}ms
+            </option>
+          </select>
+          <Input v-model="localHost" placeholder="192.168.1.100" class="flex-1" @blur="emitUpdate" />
+        </div>
       </WizardField>
       <WizardField label="Port" class="w-28">
         <Input v-model.number="localPort" type="number" min="1" max="65535" @blur="emitUpdate" />
       </WizardField>
+      <Button type="button" variant="outline" size="sm" :disabled="scanning" class="h-10" @click="scanLan">
+        {{ scanning ? 'Memindai…' : 'Scan LAN' }}
+      </Button>
       <Button type="button" variant="outline" size="sm" :disabled="!localHost || testing" class="h-10" @click="runTest">
         {{ testing ? 'Menguji…' : 'Test' }}
       </Button>
@@ -117,6 +132,8 @@ const pinConfirmFor = ref('')
 const testStatus = ref('')
 const testLabel = ref('')
 const errorDetail = ref('')
+const scanning = ref(false)
+const scanCandidates = ref([])
 
 const localDevice = ref(props.device || '')
 const localCustomDevice = ref(props.device && !candidates.value.find((c) => c.port === props.device) ? props.device : '')
@@ -199,6 +216,28 @@ async function doPin() {
     errorDetail.value = `Gagal pasang udev: ${err.message}`
   } finally {
     pinning.value = false
+  }
+}
+
+async function scanLan() {
+  scanning.value = true
+  errorDetail.value = ''
+  scanCandidates.value = []
+  try {
+    const octets = (localHost.value || '').split('.')
+    const prefix = octets.length === 4 ? octets.slice(0, 3).join('.') : '192.168.1'
+    const res = await fetchApi('/api/setup/discover-gates', {
+      method: 'POST',
+      body: JSON.stringify({ subnet: `${prefix}.0/24`, port: localPort.value || 5000 }),
+    })
+    scanCandidates.value = res.candidates || []
+    if (!scanCandidates.value.length) {
+      errorDetail.value = `Tidak ada controller ditemukan di ${prefix}.0/24 — cek kabel LAN atau isi IP manual.`
+    }
+  } catch (err) {
+    errorDetail.value = `Gagal scan: ${err.message}`
+  } finally {
+    scanning.value = false
   }
 }
 

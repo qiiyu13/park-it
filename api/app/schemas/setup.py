@@ -115,6 +115,27 @@ class TestDeviceResponse(BaseModel):
     error: str | None = None
 
 
+class DiscoverGatesRequest(BaseModel):
+    """LAN scan request for Compass controllers."""
+
+    subnet: str = Field(..., description="CIDR, e.g. 192.168.1.0/24 (max /24)")
+    port: int = 5000
+
+
+class DiscoverGateCandidate(BaseModel):
+    """A responding controller found during a LAN scan."""
+
+    host: str
+    latency_ms: float
+    confirmed: bool  # True if STAT command got a Compass-shaped reply
+
+
+class DiscoverGatesResponse(BaseModel):
+    """LAN scan result."""
+
+    candidates: list[DiscoverGateCandidate]
+
+
 class WriteUdevRequest(BaseModel):
     """Udev symlink write request."""
 
