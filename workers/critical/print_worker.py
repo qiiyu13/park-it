@@ -425,12 +425,16 @@ def _print_via_controller(escpos_data: bytes, config: dict[str, Any]) -> None:
     port = config["controller_port"]
 
     if protocol == "compass":
-        from protocols.compass.protocol import CompassTransport, cmd_pr4
+        # Compass passthrough is PR3 (Serial1 @ 9600) — same command the gate-in
+        # daemon prints tickets with. PR4 is ENET-only; importing it here raised
+        # ImportError and silently dead-lettered every passthrough print job.
+        from protocols.compass.protocol import CompassTransport
+        from protocols.compass.protocol import cmd_pr3 as cmd_print
         transport = CompassTransport(host, port)
 
     elif protocol == "enet":
         from protocols.compass.protocol import CompassTransport as EnetTransport
-        from protocols.enet.protocol import cmd_pr4
+        from protocols.enet.protocol import cmd_pr4 as cmd_print
         transport = EnetTransport(host, port)
 
     else:
@@ -438,7 +442,7 @@ def _print_via_controller(escpos_data: bytes, config: dict[str, Any]) -> None:
 
     transport.connect(timeout=5.0)
     try:
-        transport.send(cmd_pr4(escpos_data))
+        transport.send(cmd_print(escpos_data))
     finally:
         transport.close()
 
