@@ -55,6 +55,12 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      - name: Type check (mypy)
+        # Was never run in CI, so it had silently stopped type-checking anything
+        # at all: `protocols/` lacked an __init__.py, mypy hit a duplicate-module
+        # error and aborted before checking a single file.
+        run: mypy .
+
       - name: Run tests
         # Tests build their schema via Base.metadata.create_all (conftest), not
         # Alembic — migrations are smoke-tested separately in the migrations job.
@@ -125,3 +131,15 @@ jobs:
 
       - name: Run tests (vitest)
         run: npm test
+
+      - name: Lint (eslint)
+        # `nuxt prepare` generates .nuxt/eslint.config.mjs, which eslint.config.mjs
+        # imports — without it eslint cannot resolve its own config.
+        run: |
+          npx nuxt prepare
+          npm run lint
+
+      - name: Production build
+        # Not previously gated. The build had been failing on a page with two
+        # <script setup> blocks, and nothing in CI would have caught it.
+        run: npm run build
