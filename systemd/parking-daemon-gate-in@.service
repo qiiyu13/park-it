@@ -1,7 +1,7 @@
 [Unit]
 Description=E-Parking Gate-In Daemon for Gate %i
-Requires=redis.service
-After=network.target redis.service
+Requires=redis-server.service
+After=network.target redis-server.service
 
 [Service]
 Type=simple
@@ -14,7 +14,8 @@ Environment=PATH=/opt/parking-system-v2/.venv/bin
 EnvironmentFile=/opt/parking-system-v2/.env
 ExecStart=/opt/parking-system-v2/.venv/bin/python -m daemons.cli --gate-id %i
 Restart=always
-RestartSec=10
+# Fast recovery: every second of daemon downtime is a blocked lane.
+RestartSec=2
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=parking-daemon-gate-in-%i

@@ -262,8 +262,18 @@ export const useGateStore = defineStore('gate', () => {
   /**
    * Confirm e-money payment (called after booth bridge deduct success).
    * Returns { success, message } — caller handles notifications.
+   *
+   * Carries the settlement fields (payload/card type/MID/TID) so this
+   * writer records complete data even when it beats the bridge's own POST.
+   * The API is idempotent — whichever lands second returns the first's
+   * result instead of erroring.
    */
-  async function confirmEmoneyPayment({ gateId, gateOutId, cardNumber, deductAmount, balanceBefore, balanceAfter, transactionCounter, rawResponseHex }) {
+  async function confirmEmoneyPayment({
+    gateId, gateOutId, transactionId, cardNumber, deductAmount,
+    balanceBefore, balanceAfter, transactionCounter, rawResponseHex,
+    settlementPayloadHex = '', cardType = null, cardTypeCode = null,
+    mid = null, tid = null,
+  }) {
     isLoading.value = true
     try {
       const { fetchApi } = useApi()
@@ -272,6 +282,7 @@ export const useGateStore = defineStore('gate', () => {
         body: JSON.stringify({
           gate_id: gateId,
           gate_out_id: gateOutId,
+          transaction_id: transactionId ?? null,
           card_number: cardNumber,
           status: 'SUCCESS',
           deduct_amount: deductAmount,
@@ -279,6 +290,11 @@ export const useGateStore = defineStore('gate', () => {
           balance_after: balanceAfter,
           transaction_counter: transactionCounter,
           raw_response_hex: rawResponseHex,
+          settlement_payload_hex: settlementPayloadHex,
+          card_type: cardType,
+          card_type_code: cardTypeCode,
+          mid,
+          tid,
         }),
       })
       if (res.success) {

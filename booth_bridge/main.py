@@ -22,6 +22,7 @@ from booth_bridge.api_client import ApiClient
 from booth_bridge.gate_opener import GateOpener
 from booth_bridge.health_server import HealthServer
 from booth_bridge.omnikey_poller import OmnikeyPoller
+from booth_bridge.outbox import ResultOutbox
 from booth_bridge.serial_manager import SerialManager
 from booth_bridge.websocket_server import WebSocketServer
 from shared.logging import configure_logging, get_logger
@@ -62,8 +63,11 @@ async def _supervise(
             )
             if ran_for >= 60.0:
                 backoff = initial_backoff_s
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, max_backoff_s)
+        # Sleep on BOTH crash and clean return — a coroutine that returns
+        # immediately (e.g. a closed WS server object) would otherwise spin
+        # at full CPU while port 5678 stays dead.
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, max_backoff_s)
 
 
 async def main() -> None:
@@ -159,11 +163,55 @@ async def main() -> None:
                 gate_code=gate_code,
             )
 
+    # Durable queue for e-money results: the card is debited before the API
+    # hears about it, so results must survive API outages and bridge crashes.
+    outbox: ResultOutbox | None = None
+    outbox_dir = config.get("outbox_dir", "/var/lib/parking-bridge/outbox")
+    try:
+        outbox = ResultOutbox(outbox_dir)
+    except OSError as e:
+        logger.error("outbox_init_failed_results_will_not_be_durable", error=str(e), dir=outbox_dir)
+
     ws_server = WebSocketServer(
-        serial_manager, port=args.port, api_config=api_config, gate_opener=gate_opener
+        serial_manager,
+        port=args.port,
+        api_config=api_config,
+        gate_opener=gate_opener,
+        outbox=outbox,
     )
     ws_server_ref[0] = ws_server
     await ws_server.start()
+
+    async def _drain_outbox() -> None:
+        """Re-drive undelivered e-money results until the queue is empty."""
+        while True:
+            await asyncio.sleep(30)
+            assert outbox is not None
+            for payload in outbox.pending():
+                try:
+                    status, body = await asyncio.to_thread(ws_server._post_booth_result_sync, payload)
+                except Exception as e:
+                    logger.warning("outbox_drain_post_failed", error=str(e))
+                    break  # API still down — back off until next tick
+                if status == 200:
+                    outbox.remove(payload)
+                    logger.info(
+                        "outbox_drain_delivered",
+                        status=payload.get("status"),
+                        transaction_id=payload.get("transaction_id"),
+                    )
+                elif 400 <= status < 500:
+                    # Deterministic rejection: keep for manual inspection but
+                    # stop hammering — skip the rest this tick too? No: other
+                    # entries may be fine, so just drop this one from the loop.
+                    logger.error(
+                        "outbox_drain_rejected",
+                        status=status,
+                        body=body[:300],
+                        transaction_id=payload.get("transaction_id"),
+                    )
+                else:
+                    break  # 5xx — server unhealthy, retry next tick
 
     if rfid_poller is not None:
         rfid_poller.start()
@@ -276,13 +324,13 @@ async def main() -> None:
             await asyncio.sleep(5)
 
     async def _ws_serve_lifetime() -> None:
-        """Wait for ws_server's underlying serve task to terminate.
+        """Wait for ws_server's underlying serve task to terminate, then rebind.
 
         websockets.serve() already starts the server in `ws_server.start()`,
-        so we just block on its closed event. If the server's lifetime task
-        dies (kernel evicts the listener, OS file table exhausted, etc.) the
-        supervisor restarts the entire start() cycle by calling
-        ``ws_server.restart()`` below.
+        so we block on its closed event. If the listener dies (kernel evicts
+        it, OS file table exhausted, etc.) we rebuild it — without this the
+        port stays dead while systemd sees a healthy process, and every POS
+        payment in the booth fails.
         """
         srv = ws_server._server
         if srv is None:
@@ -291,6 +339,8 @@ async def main() -> None:
             await asyncio.sleep(1)
             raise RuntimeError("ws_server has no underlying server object")
         await srv.wait_closed()
+        logger.warning("ws_server_listener_closed_restarting")
+        await ws_server.start()
 
     # Booth bridge version exposed in health snapshot + heartbeat. Read at
     # boot — bumping the package re-execs the systemd unit, so it's stable
@@ -384,6 +434,22 @@ async def main() -> None:
             name="sup_hw_heartbeat",
         )
     )
+
+    if api_config and outbox is not None:
+        supervisors.append(
+            asyncio.create_task(
+                _supervise("outbox_drain", _drain_outbox),
+                name="sup_outbox_drain",
+            )
+        )
+        # Replay entries left over from a previous run (crash between deduct
+        # and delivery) immediately instead of waiting for the first tick.
+        for stale in outbox.pending():
+            logger.warning(
+                "outbox_replaying_stale_entry",
+                status=stale.get("status"),
+                transaction_id=stale.get("transaction_id"),
+            )
 
     if rfid_poller is not None:
         poller_ref = rfid_poller  # mypy: capture non-None binding

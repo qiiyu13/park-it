@@ -48,13 +48,20 @@ async def _check_idempotency(idempotency_key: str | None) -> PaymentResponse | N
         cached = await redis_client.get(f"idempotency:{idempotency_key}")
         if cached:
             return PaymentResponse(**json.loads(cached))
-    except Exception:
-        pass
+    except Exception as e:
+        # Availability over dedup: without Redis the payment still has the DB
+        # row lock; failing closed would block the exit lane entirely.
+        logger.warning("idempotency_check_unavailable", error=str(e))
     return None
 
 
 async def _store_idempotency(idempotency_key: str | None, response: PaymentResponse) -> None:
-    """Cache a payment response for idempotency deduplication."""
+    """Cache a payment response for idempotency deduplication.
+
+    SET NX closes the check-then-act race: two concurrent requests with the
+    same key — only the first writes, and the loser reads the winner's cached
+    response on its next attempt.
+    """
     if not idempotency_key:
         return
     try:
@@ -63,9 +70,10 @@ async def _store_idempotency(idempotency_key: str | None, response: PaymentRespo
             f"idempotency:{idempotency_key}",
             response.model_dump_json(),
             ex=IDEMPOTENCY_TTL,
+            nx=True,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("idempotency_store_failed", error=str(e))
 
 
 def _get_operator_id(user: dict) -> int | None:
@@ -215,6 +223,7 @@ async def emoney_result(
             db,
             gate_id=result.gate_id,
             gate_out_id=result.gate_out_id,
+            transaction_id=result.transaction_id,
             card_number=result.card_number,
             status=status_enum,
             deduct_amount=result.deduct_amount,
@@ -225,6 +234,8 @@ async def emoney_result(
             settlement_payload_hex=result.settlement_payload_hex,
             card_type=result.card_type,
             card_type_code=result.card_type_code,
+            mid=result.mid,
+            tid=result.tid,
             operator_id=_get_operator_id(user),
         )
         return PaymentResponse(
@@ -296,6 +307,7 @@ async def emoney_booth_result(
             db,
             gate_id=result.gate_id,
             gate_out_id=result.gate_out_id,
+            transaction_id=result.transaction_id,
             card_number=result.card_number,
             status=status_enum,
             deduct_amount=result.deduct_amount,
@@ -306,6 +318,8 @@ async def emoney_booth_result(
             settlement_payload_hex=result.settlement_payload_hex,
             card_type=result.card_type,
             card_type_code=result.card_type_code,
+            mid=result.mid,
+            tid=result.tid,
             operator_id=None,
         )
         return PaymentResponse(

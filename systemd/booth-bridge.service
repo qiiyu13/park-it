@@ -8,6 +8,8 @@ User=parking
 WorkingDirectory=/opt/parking-system-v2
 Environment=PYTHONPATH=/opt/parking-system-v2
 EnvironmentFile=/opt/parking-system-v2/.env
+# Writable home for the e-money result outbox (/var/lib/parking-bridge).
+StateDirectory=parking-bridge
 ExecStart=/opt/parking-system-v2/.venv/bin/python -m booth_bridge.main --config /etc/parking/booth.json
 Restart=always
 RestartSec=5

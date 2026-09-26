@@ -66,6 +66,7 @@
             label="Tunai"
             shortcut="F1"
             :disabled="!canPayCash"
+            :processing="isProcessing"
             @click="$emit('pay-cash')"
           />
           <PaymentButton
@@ -73,6 +74,7 @@
             label="E-Money"
             shortcut="F2"
             :disabled="!canPayEmoney"
+            :processing="isProcessing"
             @click="$emit('pay-emoney')"
           />
         </div>

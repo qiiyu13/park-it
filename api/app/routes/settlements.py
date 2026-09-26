@@ -54,10 +54,19 @@ async def trigger_settlement(
     db=Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """Manually trigger settlement file generation."""
+    """Manually trigger settlement file generation.
+
+    Passes the real ARQ redis in ctx — without it the day-lock is bypassed
+    (double-settlement racing the 02:00 cron) and generated files are never
+    enqueued for upload. The lockless path still exists for Redis outages
+    (SKIP LOCKED protects), but here Redis is available by definition.
+    """
+    from shared.redis import get_arq_redis
     from workers.background.settlement_worker import generate_settlement_file
 
-    # Mock context with no redis for now
-    ctx = {}
+    try:
+        ctx = {"redis": await get_arq_redis()}
+    except Exception:
+        ctx = {}
     result = await generate_settlement_file(ctx)
     return SettlementTriggerResponse(**result)

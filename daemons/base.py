@@ -55,6 +55,10 @@ class BaseDaemon(ABC):
         self._command_stream = f"parking.commands.{gate_id}"
         self._event_channel = f"parking.events.{gate_id}"
         self._state_key = f"daemon:state:{gate_id}"
+        # Redelivery accounting for reclaimed (never-ACKed) commands — a
+        # permanently failing command must not loop forever.
+        self._redelivery_counts: dict[str, int] = {}
+        self._max_redeliveries = 3
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -237,6 +241,15 @@ class BaseDaemon(ABC):
 
         while self._running:
             try:
+                # First reclaim commands that were read but never ACKed —
+                # handler exception or a daemon crash mid-processing. The
+                # consumer name is per-boot, so without XAUTOCLAIM those PEL
+                # entries are orphaned forever (not ACKing alone never
+                # redelivers to a fresh consumer). Idle threshold 30s keeps
+                # us from stealing a message this same consumer is still
+                # working on.
+                await self._reclaim_stale_commands()
+
                 messages = await self._redis.xreadgroup(
                     groupname=self._consumer_group,
                     consumername=self._consumer_name,
@@ -262,6 +275,54 @@ class BaseDaemon(ABC):
                     error=str(e),
                 )
                 await asyncio.sleep(1)
+
+    async def _reclaim_stale_commands(self) -> None:
+        """Claim never-ACKed commands from the group's PEL and reprocess."""
+        if self._redis is None:
+            return
+        try:
+            _next_id, entries, _deleted = await self._redis.xautoclaim(
+                self._command_stream,
+                self._consumer_group,
+                self._consumer_name,
+                min_idle_time=30_000,
+                start_id="0-0",
+                count=10,
+            )
+        except Exception as e:
+            logger.warning(
+                "command_reclaim_error",
+                gate_id=self.gate_id,
+                error=str(e),
+            )
+            return
+
+        for msg_id, fields in entries:
+            attempts = self._redelivery_counts.get(msg_id, 0) + 1
+            if attempts > self._max_redeliveries:
+                # Poison command: drop it rather than hot-loop, and make the
+                # loss loud — the API believes "command sent" means delivered.
+                self._redelivery_counts.pop(msg_id, None)
+                logger.error(
+                    "command_redelivery_exhausted_dropped",
+                    gate_id=self.gate_id,
+                    command_type=fields.get("command_type", "unknown"),
+                    msg_id=msg_id,
+                    attempts=self._max_redeliveries,
+                )
+                await self._redis.xack(
+                    self._command_stream, self._consumer_group, msg_id
+                )
+                continue
+            self._redelivery_counts[msg_id] = attempts
+            logger.warning(
+                "command_reclaimed",
+                gate_id=self.gate_id,
+                command_type=fields.get("command_type", "unknown"),
+                msg_id=msg_id,
+                attempt=attempts,
+            )
+            await self._process_command(msg_id, fields)
 
     async def _process_command(self, msg_id: str, fields: dict[str, str]) -> None:
         """Process a single command message."""
@@ -293,6 +354,7 @@ class BaseDaemon(ABC):
                     self._consumer_group,
                     msg_id,
                 )
+                self._redelivery_counts.pop(msg_id, None)
                 logger.info(
                     "command_acked",
                     gate_id=self.gate_id,
@@ -300,7 +362,9 @@ class BaseDaemon(ABC):
                     msg_id=msg_id,
                 )
             else:
-                # Do not ACK — Redis will redeliver
+                # Not ACKed: the entry stays in our PEL and is re-claimed by
+                # _reclaim_stale_commands after 30s idle (up to
+                # _max_redeliveries, then dropped with an error log).
                 logger.warning(
                     "command_nack",
                     gate_id=self.gate_id,
@@ -315,7 +379,7 @@ class BaseDaemon(ABC):
                 command_type=fields.get("command_type", "unknown"),
                 error=str(e),
             )
-            # Do not ACK on exception — allow retry
+            # Not ACKed — same reclaim path as a NACK above.
         finally:
             clear_context()
 

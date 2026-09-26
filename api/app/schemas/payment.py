@@ -40,6 +40,10 @@ class EmoneyResultRequest(BaseModel):
 
     gate_id: str = Field(..., description="Daemon gate ID")
     gate_out_id: int = Field(..., description="Gate-out database ID")
+    transaction_id: int | None = Field(
+        default=None,
+        description="Parking transaction armed for this deduct — primary correlation",
+    )
     card_number: str = Field(..., min_length=4, max_length=32, description="E-money card number")
     card_type: str | None = Field(default=None, description="Card type name")
     card_type_code: int | None = Field(default=None, ge=0, le=255, description="PASSTI card type code")
@@ -50,6 +54,8 @@ class EmoneyResultRequest(BaseModel):
     transaction_counter: int = Field(..., ge=0)
     raw_response_hex: str = Field(default="")
     settlement_payload_hex: str = Field(default="")
+    mid: str | None = Field(default=None, description="Reader MID from deduct response")
+    tid: str | None = Field(default=None, description="Reader TID from deduct response")
 
 
 class TransactionLookupRequest(BaseModel):

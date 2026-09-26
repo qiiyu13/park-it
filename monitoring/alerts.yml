@@ -27,6 +27,18 @@ groups:
           summary: "Gate {{ $labels.gate_id }} daemon offline"
           description: "No fresh heartbeat from gate {{ $labels.gate_id }} for >2m. Entry/exit on that lane is down — check the daemon and controller link."
 
+      - alert: GateDaemonNeverSeen
+        # A daemon dead since before Prometheus started has no gauge sample
+        # at all, so `gate_online == 0` never fires for it. absent() catches
+        # the "never observed" case.
+        expr: absent(gate_online)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No gate heartbeats observed"
+          description: "Prometheus has never scraped a gate_online sample for 5m. Either no daemons are running or the API metrics endpoint is not being scraped."
+
   - name: eparking-payments
     rules:
       - alert: HighPaymentFailureRate

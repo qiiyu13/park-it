@@ -1,7 +1,9 @@
 [Unit]
 Description=E-Parking API (FastAPI + Gunicorn)
-After=network.target redis.service postgresql.service
-Wants=redis.service postgresql.service
+# Ubuntu's Redis unit is redis-server.service (redis.service does not exist,
+# so the old Wants= gave us no ordering guarantee vs Redis at boot).
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
 
 [Service]
 Type=simple

@@ -74,6 +74,28 @@ def _bcd_timeout(sec: int) -> bytes:
     return _to_bcd(f"{sec:04d}")
 
 
+def is_complete_frame(raw: bytes) -> bool:
+    """True when ``raw`` holds at least one full PASSTI frame.
+
+    Used by the serial read loop to accumulate bytes across multiple reads
+    instead of assuming the response arrives in one chunk within 1s.
+    Scans to the first STX so leading line noise doesn't wedge the check.
+    """
+    start = raw.find(bytes([STX]))
+    if start < 0:
+        return False
+    if len(raw) - start < 3:
+        return False
+    data_len = (raw[start + 1] << 8) | raw[start + 2]
+    return len(raw) - start >= 3 + data_len + 1
+
+
+def trim_to_frame(raw: bytes) -> bytes:
+    """Drop leading bytes before the first STX (line noise guard)."""
+    start = raw.find(bytes([STX]))
+    return raw[start:] if start > 0 else raw
+
+
 def build_frame(cmd: int, data: bytes = b"") -> bytes:
     """Build a PASSTI command frame.
 

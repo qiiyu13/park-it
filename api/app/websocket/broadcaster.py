@@ -36,26 +36,48 @@ class RedisBroadcaster:
         logger.info("ws_broadcaster_stopped")
 
     async def _listen(self) -> None:
-        """Listen for Redis pub/sub messages."""
-        await redis_client.connect()
-        pubsub = redis_client.client.pubsub()
-        await pubsub.psubscribe("parking.events.*")
+        """Listen for Redis pub/sub messages, reconnecting on failure.
 
-        try:
-            async for message in pubsub.listen():
+        Previously any Redis error ended this task forever while
+        ``_running`` stayed True (so ``start()`` never restarted it) — WS
+        clients kept their connections but received no events until process
+        restart. Self-heal with capped backoff instead.
+        """
+        delay = 1.0
+        while self._running:
+            pubsub = None
+            try:
+                await redis_client.connect()
+                pubsub = redis_client.client.pubsub()
+                await pubsub.psubscribe("parking.events.*")
+                delay = 1.0  # healthy — reset backoff
+
+                async for message in pubsub.listen():
+                    if not self._running:
+                        break
+                    if message["type"] == "pmessage":
+                        channel = message["channel"]
+                        data = message["data"]
+                        await self._handle_message(channel, data)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
                 if not self._running:
                     break
-                if message["type"] == "pmessage":
-                    channel = message["channel"]
-                    data = message["data"]
-                    await self._handle_message(channel, data)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("ws_broadcaster_error", error=str(e))
-        finally:
-            await pubsub.punsubscribe("parking.events.*")
-            await pubsub.close()
+                logger.error(
+                    "ws_broadcaster_error_reconnecting",
+                    error=str(e),
+                    next_retry_s=delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+            finally:
+                if pubsub is not None:
+                    try:
+                        await pubsub.punsubscribe("parking.events.*")
+                        await pubsub.close()
+                    except Exception:
+                        pass
 
     async def _handle_message(self, channel: str, data: str) -> None:
         """Handle a Redis pub/sub message."""

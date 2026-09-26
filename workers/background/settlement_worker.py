@@ -41,13 +41,11 @@ async def generate_settlement_file(ctx, db=None) -> dict:
     """
     logger.info("generate_settlement_job_start")
 
-    from api.app.models.emoney_reader import EmoneyReader
-    from api.app.models.emoney_settlement import EmoneySettlement
-    from api.app.models.emoney_transaction import EmoneyTransaction
-    from api.database import AsyncSessionLocal
-
     # Lease lock: prevent duplicate settlement runs (e.g. two workers, manual + cron).
     # Lock keyed by operational day in Jakarta TZ. 1h TTL safely outlives the job.
+    # A Redis ERROR must not skip settlement (a blip at 02:00 meant no files at
+    # all) — we proceed lockless and rely on SELECT FOR UPDATE SKIP LOCKED
+    # below to serialise the actual row claiming.
     redis_client = ctx.get("redis") if ctx else None
     lock_acquired = False
     lock_key = None
@@ -57,10 +55,35 @@ async def generate_settlement_file(ctx, db=None) -> dict:
         try:
             lock_acquired = await redis_client.set(lock_key, "1", nx=True, ex=3600)
         except Exception as e:
-            logger.warning("settlement_lock_error", error=str(e))
-        if not lock_acquired:
-            logger.warning("settlement_lock_held", lock_key=lock_key)
-            return {"files_generated": 0, "total_transactions": 0, "skipped_locked": True}
+            logger.warning("settlement_lock_error_proceeding_unlocked", error=str(e))
+            lock_key = None  # nothing to release
+        else:
+            if not lock_acquired:
+                logger.warning("settlement_lock_held", lock_key=lock_key)
+                return {
+                    "status": "success",
+                    "files_generated": 0,
+                    "total_transactions": 0,
+                    "skipped_locked": True,
+                }
+
+    try:
+        return await _generate_locked(ctx, db)
+    finally:
+        # Release on completion so a legitimate same-day re-run (manual
+        # trigger after the cron) can pick up newly arrived transactions.
+        if lock_acquired and lock_key is not None:
+            try:
+                await redis_client.delete(lock_key)
+            except Exception as e:
+                logger.warning("settlement_lock_release_failed", error=str(e))
+
+
+async def _generate_locked(ctx, db=None) -> dict:
+    from api.app.models.emoney_reader import EmoneyReader
+    from api.app.models.emoney_settlement import EmoneySettlement
+    from api.app.models.emoney_transaction import EmoneyTransaction
+    from api.database import AsyncSessionLocal
 
     os.makedirs(SETTLEMENT_DIR, exist_ok=True)
 
@@ -100,6 +123,10 @@ async def generate_settlement_file(ctx, db=None) -> dict:
 
         now_jkt = datetime.now(JAKARTA_TZ)
         date_jkt_iso = now_jkt.date().isoformat()
+        # Last batch number handed out per reader this run — used when Redis
+        # INCR is unavailable so two chunks never share a filename (identical
+        # names would silently overwrite the first file on disk).
+        fallback_batch: dict[int, int] = {}
 
         for reader_id in reader_ids:
             # Get reader details
@@ -109,6 +136,8 @@ async def generate_settlement_file(ctx, db=None) -> dict:
                 continue
 
             # Fetch settle-eligible transactions for this reader (excluding QR).
+            # SKIP LOCKED: a concurrent run (lockless after Redis error) claims
+            # different rows instead of double-linking them into two files.
             tx_result = await db.execute(
                 select(EmoneyTransaction)
                 .where(
@@ -121,8 +150,22 @@ async def generate_settlement_file(ctx, db=None) -> dict:
                     ),
                 )
                 .order_by(EmoneyTransaction.created_at)
+                .with_for_update(skip_locked=True)
             )
             transactions = list(tx_result.scalars().all())
+
+            # Rows without a settlement payload cannot be represented in the
+            # file — an empty body line makes the bank reject the WHOLE file.
+            # Leave them unsettled (retry after backfill) and complain loudly.
+            unpayloaded = [t for t in transactions if not t.settlement_payload_hex]
+            if unpayloaded:
+                logger.error(
+                    "generate_settlement_rows_missing_payload_skipped",
+                    count=len(unpayloaded),
+                    reader_id=reader_id,
+                    tx_ids=[t.id for t in unpayloaded[:20]],
+                )
+                transactions = [t for t in transactions if t.settlement_payload_hex]
 
             if not transactions:
                 continue
@@ -134,7 +177,9 @@ async def generate_settlement_file(ctx, db=None) -> dict:
             for chunk_start in range(0, len(transactions), MAX_TRX_PER_FILE):
                 chunk = transactions[chunk_start : chunk_start + MAX_TRX_PER_FILE]
 
-                batch_number = await _next_batch_number(redis, reader_id, date_jkt_iso)
+                batch_number = await _next_batch_number(
+                    redis, reader_id, date_jkt_iso, fallback_batch
+                )
 
                 chunk_total = sum(tx.amount_deducted for tx in chunk)
 
@@ -191,9 +236,10 @@ async def generate_settlement_file(ctx, db=None) -> dict:
                     batch_number=batch_number,
                 )
 
-                # Hand off to the upload job. ARQ will retry on failure
-                # (and won't double-upload because the upload_settlement_job
-                # checks current status before sending).
+                # Hand off to the upload job. The upload job raises arq.Retry
+                # on transient failure; orphaned GENERATED/FAILED files (crash
+                # before enqueue, exhausted retries) are swept by
+                # retry_stalled_settlements cron.
                 await _enqueue_upload(ctx, settlement.id)
 
     logger.info(
@@ -238,16 +284,22 @@ async def _enqueue_upload(ctx: dict, settlement_id: int) -> None:
         )
 
 
-async def _next_batch_number(redis, reader_id: int, date_iso: str) -> int:
+async def _next_batch_number(
+    redis, reader_id: int, date_iso: str, fallback_batch: dict[int, int] | None = None
+) -> int:
     """Atomically allocate the next daily batch number for a reader.
 
     Multibank v1.3 §I: batch_no resets daily (in operational timezone). Uses
     Redis INCR for atomicity so concurrent settlement runs never collide.
-    Falls back to 1 if redis is unavailable (acceptable: subsequent runs may
-    reuse the number, but the bank dedupes by file content hash).
+    Falls back to a run-local counter when Redis is unavailable — returning
+    a constant 1 would give two chunks the same timestamp+batch filename and
+    the second file would overwrite the first on disk.
     """
+    if fallback_batch is None:
+        fallback_batch = {}
     if redis is None:
-        return 1
+        fallback_batch[reader_id] = fallback_batch.get(reader_id, 0) + 1
+        return fallback_batch[reader_id]
     try:
         batch_key = f"settlement:batch:{reader_id}:{date_iso}"
         n = await redis.incr(batch_key)
@@ -257,4 +309,5 @@ async def _next_batch_number(redis, reader_id: int, date_iso: str) -> int:
         return int(n)
     except Exception:
         logger.warning("settlement_batch_redis_unavailable", reader_id=reader_id)
-        return 1
+        fallback_batch[reader_id] = fallback_batch.get(reader_id, 0) + 1
+        return fallback_batch[reader_id]

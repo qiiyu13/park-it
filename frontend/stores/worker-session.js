@@ -10,6 +10,7 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
   const workers = ref([])             // list of active workers with PINs
   const isLoading = ref(false)
   const error = ref(null)
+  const fetchError = ref(null)        // last transient session-fetch failure
 
   const sessionStatus = computed(() => activeSession.value?.status || null)
   const currentWorker = computed(() => activeSession.value?.worker || null)
@@ -32,8 +33,17 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
       const { fetchApi } = useApi()
       const data = await fetchApi(`/api/worker-sessions/active?gate_id=${gateId}`)
       activeSession.value = data
+      fetchError.value = null
     } catch (err) {
-      if (err.status !== 404) console.warn('fetchActiveSession:', err.message)
+      if (err.status !== 404) {
+        // Transient failure (network/server blip): keep the last known value
+        // instead of nulling it — a false "no session" throws the operator
+        // into the blocking check-in dialog while their shift is still live.
+        fetchError.value = err.message
+        console.warn('fetchActiveSession:', err.message)
+        return
+      }
+      fetchError.value = null
       activeSession.value = null
     }
   }
@@ -145,6 +155,7 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
     workers,
     isLoading,
     error,
+    fetchError,
     sessionStatus,
     currentWorker,
     isUncovered,

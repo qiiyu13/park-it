@@ -46,7 +46,7 @@ class FakeSerialManager:
     def __init__(self, response: bytes):
         self._response = response
 
-    def send(self, peripheral: str, data: bytes) -> bytes:
+    def send(self, peripheral: str, data: bytes, **kwargs) -> bytes:
         return self._response
 
 

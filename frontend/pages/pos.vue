@@ -158,6 +158,20 @@ const showCheckInDialog = computed(() =>
   !workerSessionStore.isLoading
 )
 
+// The check-in dialog blocks the whole POS. If it's shown with an empty
+// worker list (fetchWorkers failed at boot), the operator is stranded with
+// "contact your admin" and no retry — re-fetch every 15s while shown.
+watch(showCheckInDialog, (shown) => {
+  if (!shown) return
+  const timer = setInterval(async () => {
+    if (!showCheckInDialog.value || workerSessionStore.workers.length) {
+      clearInterval(timer)
+      return
+    }
+    await workerSessionStore.fetchWorkers()
+  }, 15000)
+})
+
 const handoverInitialStep = computed(() =>
   workerSessionStore.isPendingHandover ? 'pending' : 'outgoing'
 )
@@ -340,9 +354,18 @@ watch(selectedGate, (gate) => {
 
 // Keyboard shortcuts
 useKeyboard([
-  { keys: ['F1'], action: () => gateStore.canPayCash && (showCashDialog.value = true) },
-  { keys: ['F2'], action: () => gateStore.canPayEmoney && startEmoneyPayment() },
-  { keys: ['F3'], action: () => gateStore.canPayRfid && (showRfidDialog.value = true) }, // hidden fallback
+  { keys: ['F1'], action: () => {
+    if (gateStore.canPayCash) showCashDialog.value = true
+    else toast.warning('Bayar Cash belum tersedia — pindai tiket terlebih dulu')
+  } },
+  { keys: ['F2'], action: () => {
+    if (gateStore.canPayEmoney) startEmoneyPayment()
+    else toast.warning('E-money belum tersedia — pindai tiket atau hubungkan booth bridge')
+  } },
+  { keys: ['F3'], action: () => {
+    if (gateStore.canPayRfid) showRfidDialog.value = true
+    else toast.warning('Bayar RFID belum tersedia — pindai tiket terlebih dulu')
+  } }, // hidden fallback
   { keys: [' '], action: () => gateStore.awaitingGateOpen && openGateAction() },
   { keys: ['Escape'], action: () => { showCashDialog.value = false; showRfidDialog.value = false } },
   {
@@ -475,6 +498,7 @@ async function startEmoneyPayment() {
     action: 'emoney_deduct',
     peripheral: 'emoney_reader',
     amount: armed.fee,
+    transaction_id: armed.transaction_id,
     gate_id: gateCode,
     gate_out_id: selectedGate.value.id,
   }))
@@ -617,12 +641,18 @@ function handleBoothMessage(data) {
         gateStore.confirmEmoneyPayment({
           gateId: gateCode,
           gateOutId: selectedGate.value.id,
+          transactionId: data.transaction_id,
           cardNumber: data.card_number,
           deductAmount: data.deduct_amount,
           balanceBefore: data.balance_before,
           balanceAfter: data.balance_after,
           transactionCounter: data.transaction_counter,
           rawResponseHex: data.raw_response_hex,
+          settlementPayloadHex: data.settlement_payload_hex,
+          cardType: data.card_type,
+          cardTypeCode: data.card_type_code,
+          mid: data.mid,
+          tid: data.tid,
         })
       }
       toast.success('Pembayaran e-money berhasil')

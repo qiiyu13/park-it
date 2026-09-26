@@ -25,6 +25,11 @@ from shared.logging import get_logger
 
 logger = get_logger("settlement_uploader")
 
+# How many times a bank-rejected transaction may be re-generated into a new
+# settlement file before we stop and log loudly (a permanently invalid
+# payload must not be resubmitted forever).
+MAX_SETTLEMENT_RETRIES = 3
+
 # Multibank v1.3 §II — Response Transaction Data, Status field
 RESPONSE_STATUS_CODES: dict[str, str] = {
     "00": "Accepted",
@@ -68,7 +73,7 @@ def parse_ok_response(content: str) -> dict[str, Any]:
             ],
         }
     """
-    lines = content.strip().split("\n")
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n")
     if not lines or len(lines[0]) < 5:
         return {"trx_type": "", "trx_count": 0, "results": []}
 
@@ -266,8 +271,12 @@ async def fetch_response_file(
 async def upload_settlement_job(ctx: dict, settlement_id: int) -> dict:
     """ARQ job: upload one EmoneySettlement file by ID.
 
-    Marks status UPLOADED on success; raises on failure so ARQ retries.
+    Marks status UPLOADED on success. Transient failures raise arq.Retry —
+    a plain exception ends the job on try 1 (ARQ only re-queues Retry), and
+    one SFTP blip used to leave the file FAILED forever with no retry.
     """
+    from arq import Retry
+
     from api.app.models.emoney_settlement import EmoneySettlement
     from api.database import AsyncSessionLocal
     from shared.config import get_settings
@@ -293,7 +302,7 @@ async def upload_settlement_job(ctx: dict, settlement_id: int) -> dict:
             return {"status": "skipped", "reason": f"state={settlement.status}"}
 
         try:
-            await upload_settlement_file(
+            uploaded = await upload_settlement_file(
                 file_path=settlement.file_path,
                 host=settings.settlement_sftp_host,
                 port=settings.settlement_sftp_port,
@@ -303,6 +312,11 @@ async def upload_settlement_job(ctx: dict, settlement_id: int) -> dict:
                 remote_dir=settings.settlement_sftp_remote_dir,
                 connect_timeout=settings.settlement_sftp_connect_timeout,
             )
+            if not uploaded:
+                # Missing file on disk — do NOT mark UPLOADED. Leave it
+                # GENERATED so the sweep keeps it visible instead of the
+                # charge vanishing from the upload pipeline.
+                raise FileNotFoundError(f"settlement file missing: {settlement.file_path}")
         except Exception as e:
             logger.error(
                 "settlement_upload_failed",
@@ -311,7 +325,25 @@ async def upload_settlement_job(ctx: dict, settlement_id: int) -> dict:
             )
             settlement.status = "FAILED"
             await db.commit()
-            raise
+            job_try = ctx.get("job_try", 1)
+            max_tries = ctx.get("max_tries", 3)
+            if job_try < max_tries:
+                raise Retry(defer=min(job_try * 30, 300)) from e
+            # Exhausted in-job retries — the file stays FAILED and the
+            # retry_stalled_settlements cron keeps re-enqueueing it hourly.
+            from workers.background.alerting import enqueue_alert
+
+            await enqueue_alert(
+                ctx,
+                key=f"settlement_upload_failed:{settlement_id}",
+                message=(
+                    f"<b>Settlement upload failed</b>\n\n"
+                    f"File: <code>{settlement.filename}</code>\n"
+                    f"Error: <code>{str(e)[:200]}</code>\n\n"
+                    f"Auto-retry continues every 30m — check SFTP config and connectivity."
+                ),
+            )
+            return {"status": "failed", "settlement_id": settlement_id, "error": str(e)}
 
         settlement.status = "UPLOADED"
         settlement.uploaded_at = datetime.now(UTC)
@@ -319,6 +351,51 @@ async def upload_settlement_job(ctx: dict, settlement_id: int) -> dict:
 
         logger.info("settlement_upload_job_done", settlement_id=settlement_id)
         return {"status": "success", "settlement_id": settlement_id}
+
+
+async def retry_stalled_settlements(ctx: dict) -> dict:
+    """ARQ cron: re-enqueue uploads for settlements stuck in GENERATED/FAILED.
+
+    Closes the gaps ARQ retry alone can't: a crash between file commit and
+    enqueue (job never existed) and retries exhausted after a long SFTP
+    outage. The upload job's state check keeps this idempotent.
+    """
+    from sqlalchemy import select
+
+    from api.app.models.emoney_settlement import EmoneySettlement
+    from api.database import AsyncSessionLocal
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=10)
+    arq_redis = ctx.get("redis")
+    if arq_redis is None or not hasattr(arq_redis, "enqueue_job"):
+        return {"status": "skipped", "reason": "no_arq_redis"}
+
+    requeued = 0
+    async with AsyncSessionLocal() as db:
+        stalled = await db.execute(
+            select(EmoneySettlement).where(
+                EmoneySettlement.status.in_(["GENERATED", "FAILED"]),
+                EmoneySettlement.created_at < cutoff,
+            )
+        )
+        for settlement in stalled.scalars():
+            try:
+                await arq_redis.enqueue_job(
+                    "upload_settlement_job",
+                    settlement.id,
+                    _queue_name="arq:queue:background",
+                )
+                requeued += 1
+            except Exception as e:
+                logger.warning(
+                    "settlement_sweep_enqueue_failed",
+                    settlement_id=settlement.id,
+                    error=str(e),
+                )
+
+    if requeued:
+        logger.warning("settlement_sweep_requeued", count=requeued)
+    return {"status": "success", "requeued": requeued}
 
 
 async def poll_settlement_responses(ctx: dict) -> dict:
@@ -394,6 +471,7 @@ async def poll_settlement_responses(ctx: dict) -> dict:
                 )
             )
             ok_count = nok_count = 0
+            resubmitted = 0
             now_utc = datetime.now(UTC)
             for tx in tx_rows.scalars():
                 payload_key = (tx.settlement_payload_hex or "").upper()
@@ -403,10 +481,51 @@ async def poll_settlement_responses(ctx: dict) -> dict:
                     code = "??"
                 tx.bank_response_status = code
                 tx.bank_response_at = now_utc
-                if code == "00":
+                if code in ("00", "02"):
+                    # 02 = Duplicate Data: the bank already holds this record,
+                    # so the money is accounted for — don't resend it forever.
                     ok_count += 1
+                    continue
+                nok_count += 1
+                if code == "??":
+                    continue  # unknown state — resending blindly could double-settle
+                # Rejected: unlink so the next generation retries the charge.
+                # Capped by retry_count — a payload the bank consistently
+                # rejects (e.g. 01 invalid format) must not loop daily.
+                if tx.retry_count < MAX_SETTLEMENT_RETRIES:
+                    tx.retry_count += 1
+                    tx.settlement_batch_id = None
+                    resubmitted += 1
                 else:
-                    nok_count += 1
+                    logger.error(
+                        "settlement_tx_rejected_giving_up",
+                        tx_id=tx.id,
+                        bank_status=code,
+                        bank_status_description=RESPONSE_STATUS_CODES.get(code, "Unknown"),
+                        amount=tx.amount_deducted,
+                        settlement_id=settlement.id,
+                    )
+                    from workers.background.alerting import enqueue_alert
+
+                    await enqueue_alert(
+                        ctx,
+                        key=f"settlement_tx_rejected:{tx.id}",
+                        message=(
+                            f"<b>Settlement rejected by bank</b>\n\n"
+                            f"Tx: <code>{tx.id}</code> — Rp {tx.amount_deducted:,}\n"
+                            f"Bank status: <code>{code}</code> "
+                            f"{RESPONSE_STATUS_CODES.get(code, 'Unknown')}\n"
+                            f"Retries exhausted ({MAX_SETTLEMENT_RETRIES}). "
+                            f"This charge needs manual follow-up with the bank."
+                        ),
+                    )
+
+            if resubmitted:
+                logger.warning(
+                    "settlement_rows_unlinked_for_resubmit",
+                    count=resubmitted,
+                    settlement_id=settlement.id,
+                )
 
             if ext == "NOK" or ok_count == 0:
                 settlement.status = "ACKED_NOK"

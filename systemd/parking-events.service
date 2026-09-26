@@ -1,7 +1,8 @@
 [Unit]
 Description=E-Parking Event Consumer (Redis Pub/Sub -> server-side business logic)
-After=network.target redis.service postgresql.service
-Wants=redis.service postgresql.service
+# Ubuntu's Redis unit is redis-server.service (redis.service does not exist).
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
 
 [Service]
 Type=simple

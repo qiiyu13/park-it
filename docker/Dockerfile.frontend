@@ -18,7 +18,10 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/.output/public /var/www/parking-frontend/.output/public
+# nginx `root` is /var/www/parking-frontend and try_files resolves /index.html
+# against it — the build output must land THERE, not in a .output subdirectory
+# (which made every SPA deep link 404/redirect-loop).
+COPY --from=build /app/.output/public /var/www/parking-frontend
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

@@ -42,6 +42,36 @@ async def _set_emoney_pending(gate_id: str, transaction_id: int, gate_out_id: in
     )
 
 
+def _emoney_armed_tx_key(transaction_id: int) -> str:
+    return f"emoney:armed_tx:{transaction_id}"
+
+
+async def _claim_emoney_arm(transaction_id: int, gate_id: str) -> bool:
+    """Claim the right to deduct for ``transaction_id`` at ``gate_id``.
+
+    Two booths scanning the same ticket would otherwise both arm a deduct
+    and the driver gets charged twice. SET NX makes exactly one claim win;
+    re-arming at the SAME gate (operator retry after LOST_CONTACT) is
+    allowed, a different gate is rejected until the claim expires or the
+    result arrives.
+    """
+    await redis_client.connect()
+    key = _emoney_armed_tx_key(transaction_id)
+    acquired = await redis_client.set(key, gate_id, ex=EMONEY_PENDING_TTL_SECONDS, nx=True)
+    if acquired:
+        return True
+    holder = await redis_client.get(key)
+    if holder == gate_id:
+        await redis_client.set(key, gate_id, ex=EMONEY_PENDING_TTL_SECONDS)  # refresh TTL
+        return True
+    return False
+
+
+async def _release_emoney_arm(transaction_id: int) -> None:
+    await redis_client.connect()
+    await redis_client.delete(_emoney_armed_tx_key(transaction_id))
+
+
 async def _get_emoney_pending(gate_id: str) -> dict | None:
     await redis_client.connect()
     raw = await redis_client.get(_emoney_pending_key(gate_id))
@@ -310,7 +340,17 @@ async def process_emoney_deduct(
 
     fee = await calculate_transaction_fee(db, tx)
 
+    # Cross-booth double-deduct guard: only one gate may arm a deduct per
+    # transaction (same-gate re-arm for retries stays allowed).
+    if not await _claim_emoney_arm(tx.id, gate_id):
+        raise ValueError("Pembayaran e-money sedang berjalan di gate lain")
+
     await _set_emoney_pending(gate_id, tx.id, gate_out_id, fee)
+
+    # DB-level in-flight marker: lets timeout_pending_payments recover stuck
+    # arms (it queries payment_method='PENDING') and shows the POS state.
+    tx.payment_method = "PENDING"
+    await db.flush()
 
     logger.info(
         "emoney_deduct_armed",
@@ -325,6 +365,58 @@ async def process_emoney_deduct(
         "fee": fee,
         "status": "ARMED",
     }
+
+
+async def _resolve_emoney_reader(db: AsyncSession, mid: str | None, tid: str | None):
+    """Link a deduct to its configured reader for settlement grouping.
+
+    Matches MID+TID from the PASSTI response against admin-configured
+    readers (case-insensitive). Falls back to the single active reader when
+    exactly one is configured — the standard one-reader booth — so
+    settlement isn't silently skipped over a formatting mismatch. Returns
+    None (and logs) when ambiguous; those rows are excluded from files and
+    the error log makes the gap visible.
+    """
+    from sqlalchemy import func, select
+
+    from api.app.models import EmoneyReader
+
+    if mid or tid:
+        q = select(EmoneyReader).where(EmoneyReader.is_active == True)  # noqa: E712
+        if mid:
+            q = q.where(func.upper(EmoneyReader.mid) == mid.upper())
+        if tid:
+            q = q.where(func.upper(EmoneyReader.tid) == tid.upper())
+        reader = (await db.execute(q)).scalar_one_or_none()
+        if reader is not None:
+            return reader
+
+    count = (
+        await db.execute(
+            select(func.count(EmoneyReader.id)).where(EmoneyReader.is_active == True)  # noqa: E712
+        )
+    ).scalar_one()
+    if count == 1:
+        reader = (
+            await db.execute(
+                select(EmoneyReader).where(EmoneyReader.is_active == True)  # noqa: E712
+            )
+        ).scalar_one()
+        logger.warning(
+            "emoney_reader_matched_by_fallback",
+            mid=mid,
+            tid=tid,
+            reader_id=reader.id,
+        )
+        return reader
+
+    logger.error(
+        "emoney_reader_unresolved_excluded_from_settlement",
+        mid=mid,
+        tid=tid,
+        active_readers=count,
+    )
+    return None
 
 
 async def process_emoney_result(
@@ -342,12 +434,21 @@ async def process_emoney_result(
     settlement_payload_hex: str = "",
     card_type: str | None = None,
     card_type_code: int | None = None,
+    mid: str | None = None,
+    tid: str | None = None,
+    transaction_id: int | None = None,
     operator_id: int | None = None,
 ) -> dict:
     """Process the result of an e-money deduct operation.
 
-    This is called when FastAPI receives the `deduct_result` event from
-    the daemon (via Redis Pub/Sub or internal handler).
+    Correlation: prefers the explicit ``transaction_id`` echoed back by the
+    booth bridge (survives Redis pending expiry / outbox replay), falling
+    back to the Redis pending state armed at deduct time.
+
+    Idempotent: a duplicate delivery (bridge retry, POS confirm racing the
+    bridge) returns the already-recorded result instead of erroring, and a
+    late SUCCESS for a transaction that completed another way still records
+    the EmoneyTransaction so the charge reaches settlement.
 
     Args:
         db: Database session
@@ -360,24 +461,99 @@ async def process_emoney_result(
         balance_after: Balance after deduction
         transaction_counter: PASSTI transaction counter
         raw_response_hex: Raw PASSTI response
+        settlement_payload_hex: Deduct body (cardtype..CardLog) for settlement
+        mid/tid: Reader identifiers from the deduct response
+        transaction_id: Parking transaction armed for this deduct
         operator_id: POS operator ID
 
     Returns:
         dict with transaction, emoney_transaction_id, success bool
     """
+    from sqlalchemy import select
+
     from api.app.models import EmoneyTransaction, ParkingTransaction
 
     pending = await _get_emoney_pending(gate_id)
-    if pending is None:
+    tx_id = transaction_id or (pending["transaction_id"] if pending else None)
+    if tx_id is None:
         raise ValueError("No pending e-money deduct for this gate (timeout or never armed)")
 
     # Bound the FOR UPDATE wait: if another booth-result is mid-flight on the
     # same row, fail fast instead of holding the connection (and blocking all
     # other payment ops) until the slow path commits.
     await db.execute(text("SET LOCAL lock_timeout = '3s'"))
-    tx = await db.get(ParkingTransaction, pending["transaction_id"], with_for_update=True)
-    if tx is None or tx.status != "ACTIVE":
-        await _clear_emoney_pending(gate_id)
+    tx = await db.get(ParkingTransaction, tx_id, with_for_update=True)
+    if tx is None:
+        raise ValueError("Pending transaction missing or already completed")
+
+    if tx.status != "ACTIVE":
+        # Duplicate delivery or a late result: if this exact deduct was
+        # already recorded, return it as success (idempotent replay).
+        existing = (
+            await db.execute(
+                select(EmoneyTransaction).where(
+                    EmoneyTransaction.parking_transaction_id == tx.id,
+                    EmoneyTransaction.card_number == card_number,
+                    EmoneyTransaction.transaction_counter == transaction_counter,
+                )
+            )
+        ).scalars().first()
+        if existing is not None:
+            await _clear_emoney_pending(gate_id)
+            await _release_emoney_arm(tx.id)
+            logger.info(
+                "emoney_result_duplicate_ignored",
+                transaction_id=tx.id,
+                emoney_transaction_id=existing.id,
+                gate_id=gate_id,
+            )
+            return {
+                "transaction": tx,
+                "emoney_transaction_id": existing.id,
+                "success": existing.status == "SUCCESS",
+                "status": existing.status,
+                "is_intermediate": False,
+            }
+        # SUCCESS landing after cash/RFID fallback: the card WAS debited.
+        # Record it (settlement must collect it) and flag loudly — ops owes
+        # the driver a refund.
+        if status in (DeductStatus.SUCCESS, DeductStatus.CORRECTION_VERIFIED):
+            late_reader = await _resolve_emoney_reader(db, mid, tid)
+            emoney_tx = EmoneyTransaction(
+                parking_transaction_id=tx.id,
+                emoney_reader_id=late_reader.id if late_reader else None,
+                card_number=card_number,
+                card_type=card_type,
+                card_type_code=card_type_code,
+                amount_deducted=deduct_amount,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                transaction_counter=transaction_counter,
+                raw_response_hex=raw_response_hex,
+                settlement_payload_hex=settlement_payload_hex or None,
+                status=status.value,
+            )
+            db.add(emoney_tx)
+            await db.flush()
+            await db.refresh(emoney_tx)
+            await _clear_emoney_pending(gate_id)
+            await _release_emoney_arm(tx.id)
+            logger.error(
+                "emoney_late_success_after_completion_refund_owed",
+                transaction_id=tx.id,
+                emoney_transaction_id=emoney_tx.id,
+                tx_status=tx.status,
+                payment_method=tx.payment_method,
+                deduct_amount=deduct_amount,
+                gate_id=gate_id,
+            )
+            return {
+                "transaction": tx,
+                "emoney_transaction_id": emoney_tx.id,
+                "success": False,
+                "status": status.value,
+                "is_intermediate": False,
+            }
         raise ValueError("Pending transaction missing or already completed")
 
     # Persist the card_number on the parking transaction now that we know which card paid.
@@ -385,9 +561,36 @@ async def process_emoney_result(
         tx.card_number = card_number
         await db.flush()
 
+    success = status in (DeductStatus.SUCCESS, DeductStatus.CORRECTION_VERIFIED)
+    is_intermediate = status == DeductStatus.LOST_CONTACT
+    is_terminal_failure = status in (
+        DeductStatus.FAILED,
+        DeductStatus.WRONG_CARD,
+        DeductStatus.INSUFFICIENT_BALANCE,
+        DeductStatus.CORRECTION_FAILED,
+    )
+
+    # Server-truth fee: the amount armed at deduct time. The hardware debit
+    # (deduct_amount) is what actually left the card — they should match;
+    # a mismatch means a stale/tampered client amount and must be visible.
+    armed_fee = pending.get("fee") if pending else None
+    if armed_fee is not None and deduct_amount != armed_fee and success:
+        logger.error(
+            "emoney_fee_mismatch_armed_vs_deducted",
+            transaction_id=tx.id,
+            armed_fee=armed_fee,
+            deduct_amount=deduct_amount,
+            gate_id=gate_id,
+        )
+
+    reader = None
+    if success or is_intermediate:
+        reader = await _resolve_emoney_reader(db, mid, tid)
+
     # Create EmoneyTransaction record
     emoney_tx = EmoneyTransaction(
         parking_transaction_id=tx.id,
+        emoney_reader_id=reader.id if reader else None,
         card_number=card_number,
         card_type=card_type,
         card_type_code=card_type_code,
@@ -403,21 +606,11 @@ async def process_emoney_result(
     await db.flush()
     await db.refresh(emoney_tx)
 
-    # Determine outcome based on status
-    success = status in (DeductStatus.SUCCESS, DeductStatus.CORRECTION_VERIFIED)
-    is_intermediate = status == DeductStatus.LOST_CONTACT
-    is_terminal_failure = status in (
-        DeductStatus.FAILED,
-        DeductStatus.WRONG_CARD,
-        DeductStatus.INSUFFICIENT_BALANCE,
-        DeductStatus.CORRECTION_FAILED,
-    )
-
     if success:
         shift = await get_current_shift(db)
         # Prefer gate_out_id from pending state (set at arm time) over the
         # one the booth bridge echoes back.
-        effective_gate_out_id = pending.get("gate_out_id") or gate_out_id
+        effective_gate_out_id = (pending or {}).get("gate_out_id") or gate_out_id
 
         tx = await complete_exit_transaction(
             db,
@@ -432,6 +625,7 @@ async def process_emoney_result(
         )
 
         await _clear_emoney_pending(gate_id)
+        await _release_emoney_arm(tx.id)
         await enqueue_snapshots_for_gate(db, gate_id, tx.id, "exit")
 
         # Attended exit: POS shows payment result, operator opens gate via booth_bridge.
@@ -461,7 +655,7 @@ async def process_emoney_result(
         )
 
     elif is_intermediate:
-        # LOST_CONTACT: keep pending state so operator can ask driver to re-tap same card.
+        # LOST_CONTACT: keep pending + arm so operator can ask driver to re-tap same card.
         logger.warning(
             "emoney_lost_contact",
             transaction_id=tx.id,
@@ -470,8 +664,12 @@ async def process_emoney_result(
         )
 
     elif is_terminal_failure or status == DeductStatus.TIMEOUT:
-        # Clear pending; transaction stays ACTIVE so operator can fall back to cash.
+        # Clear pending + arm; transaction stays ACTIVE so operator can fall back to cash.
         await _clear_emoney_pending(gate_id)
+        await _release_emoney_arm(tx.id)
+        tx.payment_method = None
+        tx.fee = None
+        await db.flush()
         logger.warning(
             "emoney_payment_failed",
             transaction_id=tx.id,

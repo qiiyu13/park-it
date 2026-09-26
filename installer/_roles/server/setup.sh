@@ -244,7 +244,6 @@ services=(
     "parking-events.service"
     "parking-frontend.service"
     "parking-worker-critical.service"
-    "parking-worker-snapshot.service"
     "parking-worker-bg.service"
 )
 

@@ -6,6 +6,18 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _is_placeholder_secret(value: str | None) -> bool:
+    """True for empty values and the example/placeholder strings shipped in
+    .env.example (change-me, your-..., example, ...-here, dev-secret)."""
+    if not value:
+        return True
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in ("change-me", "change_me", "your-", "example", "dev-secret")
+    ) or lowered.endswith("-here")
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -26,8 +38,11 @@ class Settings(BaseSettings):
     db_name: str = Field(default="parking", alias="DB_NAME")
     db_user: str = Field(default="parking", alias="DB_USER")
     db_password: str = Field(default="parking_secret", alias="DB_PASSWORD")
-    db_pool_size: int = Field(default=20, alias="DB_POOL_SIZE")
-    db_max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
+    # Sized against Postgres default max_connections=100: 4 gunicorn workers
+    # + events service + 2 ARQ workers each open their own pool. The old
+    # 20+10 per process could demand 120+ connections and 500 under load.
+    db_pool_size: int = Field(default=8, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=4, alias="DB_MAX_OVERFLOW")
 
     # Redis
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
@@ -76,6 +91,7 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str | None = Field(default=None, alias="TELEGRAM_CHAT_ID")
 
     # ── ANPR (Automatic Number Plate Recognition) ─────────────────────
     anpr_enabled: bool = Field(default=False, alias="ANPR_ENABLED")
@@ -139,9 +155,19 @@ class Settings(BaseSettings):
                     "INTERNAL_API_KEY must be set in production — "
                     "booth bridge endpoints will be unprotected without it"
                 )
-            if self.jwt_secret in ("dev-secret", ""):
+            # Reject placeholders, not just literals: the shipped .env values
+            # ("change-me-in-production-...") passed the old check and would
+            # have signed every session token in production.
+            if _is_placeholder_secret(self.jwt_secret):
                 raise ValueError("JWT_SECRET must be changed from default in production")
-            if self.db_password in ("parking_secret", ""):
+            if _is_placeholder_secret(self.internal_api_key):
+                raise ValueError(
+                    "INTERNAL_API_KEY must be changed from the .env.example "
+                    "placeholder in production"
+                )
+            if self.db_password in ("parking_secret", "") or _is_placeholder_secret(
+                self.db_password
+            ):
                 raise ValueError("DB_PASSWORD must be changed from default in production")
             # If settlement SFTP is configured, require host-key verification —
             # an empty known_hosts disables it and leaves the money path open to MITM.

@@ -10,7 +10,7 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -25,7 +25,10 @@ services:
     image: redis:7-alpine
     container_name: parking-redis
     restart: always
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # noeviction: Redis holds ARQ jobs, command streams, PELs, payment arm
+    # state and JWT denylist entries — silent LRU eviction of any of those
+    # loses money records or delivered commands. Writes error loudly instead.
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     ports:
@@ -114,6 +117,39 @@ services:
     networks:
       - parking-network
     command: arq workers.settings.CriticalWorkerSettings
+
+  # Single-instance Redis Pub/Sub consumer. MUST NOT scale >1 or run inside
+  # the API (4 gunicorn workers → every gate event handled 4x → duplicate
+  # transactions/deducts). Without this container, gate events are published
+  # but nobody creates transactions or opens gates.
+  events:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: parking-events
+    restart: always
+    environment:
+      - APP_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-parking}
+      - DB_USER=${DB_USER:-parking}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - parking-network
+    command: python -m api.app.services.event_consumer_main
 
   worker-bg:
     build:

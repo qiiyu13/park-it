@@ -120,15 +120,29 @@ async def _revoke_token(jti: str, exp: int) -> None:
     import time
     ttl = max(0, int(exp) - int(time.time()))
     if ttl > 0:
-        await redis_client.connect()
-        await redis_client.set(_denylist_key(jti), "1", ex=ttl)
+        try:
+            await redis_client.connect()
+            await redis_client.set(_denylist_key(jti), "1", ex=ttl)
+        except Exception as e:
+            # Best-effort: a failed logout must not 500. The token expires
+            # on its own; log so the gap is visible.
+            logger.warning("token_revoke_failed", jti=jti, error=str(e))
 
 
 async def _is_token_revoked(jti: str) -> bool:
-    """Check if a token jti is in the denylist."""
-    await redis_client.connect()
-    result = await redis_client.get(_denylist_key(jti))
-    return result is not None
+    """Check if a token jti is in the denylist.
+
+    Fails OPEN on Redis errors: a Redis blip must not take down every
+    authenticated request (and every WS handshake) at once. Tokens are
+    short-lived anyway, so the exposure window equals the access-token TTL.
+    """
+    try:
+        await redis_client.connect()
+        result = await redis_client.get(_denylist_key(jti))
+        return result is not None
+    except Exception as e:
+        logger.warning("token_denylist_check_failed_fail_open", jti=jti, error=str(e))
+        return False
 
 
 async def is_token_valid(token: str) -> dict[str, Any] | None:

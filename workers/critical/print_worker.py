@@ -188,7 +188,39 @@ def _build_escpos_receipt(
     transaction_data: dict[str, Any],
     location_name: str = "",
 ) -> bytes:
-    """Build ESC/POS receipt payload for exit."""
+    """Build ESC/POS receipt payload for exit.
+
+    Accepts both the producer's keys (fee, entry_time, exit_time — what
+    payment.py actually enqueues) and the legacy display keys (total_fee,
+    time_in, ...). Only accepting the legacy set printed every receipt with
+    blank TOTAL and dates.
+    """
+    fee = transaction_data.get("total_fee")
+    if fee is None:
+        fee = transaction_data.get("fee", 0)
+    entry_iso = transaction_data.get("entry_time") or ""
+    exit_iso = transaction_data.get("exit_time") or ""
+
+    def _date_of(iso: str) -> str:
+        return iso[:10] if iso else transaction_data.get("date", "")
+
+    def _time_of(iso: str) -> str:
+        return iso[11:16] if len(iso) > 16 else ""
+
+    time_in = transaction_data.get("time_in") or _time_of(entry_iso)
+    time_out = transaction_data.get("time_out") or _time_of(exit_iso)
+
+    duration = transaction_data.get("duration", "")
+    if not duration and entry_iso and exit_iso:
+        try:
+            from datetime import datetime
+
+            delta = datetime.fromisoformat(exit_iso) - datetime.fromisoformat(entry_iso)
+            minutes = int(delta.total_seconds() // 60)
+            duration = f"{minutes // 60}j {minutes % 60}m" if minutes >= 60 else f"{minutes}m"
+        except ValueError:
+            duration = ""
+
     lines = [
         b"\x1b\x61\x01",  # Center align
         b"STRUK PARKIR\n",
@@ -197,14 +229,14 @@ def _build_escpos_receipt(
         b"\x1b\x21\x00",  # Normal height
         b"\x1b\x61\x00",  # Left align
         f"GATE         : {transaction_data.get('gate_name', '')}\n".encode(),
-        f"TANGGAL      : {transaction_data.get('date', '')}\n".encode(),
-        f"JAM MASUK    : {transaction_data.get('time_in', '')}\n".encode(),
-        f"JAM KELUAR   : {transaction_data.get('time_out', '')}\n".encode(),
-        f"DURASI       : {transaction_data.get('duration', '')}\n".encode(),
+        f"TANGGAL      : {_date_of(exit_iso) or _date_of(entry_iso)}\n".encode(),
+        f"JAM MASUK    : {time_in}\n".encode(),
+        f"JAM KELUAR   : {time_out}\n".encode(),
+        f"DURASI       : {duration}\n".encode(),
         f"JENIS        : {transaction_data.get('vehicle_type', '')}\n".encode(),
         f"METODE       : {transaction_data.get('payment_method', '')}\n".encode(),
         b"\x1b\x61\x01",  # Center align
-        f"TOTAL        : Rp {transaction_data.get('total_fee', 0):,}\n\n".encode(),
+        f"TOTAL        : Rp {fee:,}\n\n".encode(),
         f"{transaction_data.get('additional_info', '')}\n".encode(),
         b"\x1d\x56\x41",  # Full cut
     ]

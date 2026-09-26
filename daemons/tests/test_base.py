@@ -231,6 +231,57 @@ class TestCommandConsumption:
                 assert any(fields["trace_id"] in str(cmd) for cmd in test_daemon.commands_handled)
 
 
+class TestCommandReclaim:
+    """Test XAUTOCLAIM-based reprocessing of never-ACKed commands."""
+
+    @pytest.mark.asyncio
+    async def test_reclaim_reprocesses_stale_entries(self, test_daemon: TestableDaemon) -> None:
+        """Stale PEL entries are claimed and reprocessed."""
+        await test_daemon.run()
+
+        fake = test_daemon._fake_redis
+        stale = [("5-0", {"command_type": "open_gate", "gate_id": "gate-in-1"})]
+
+        async def xautoclaim(*args, **kwargs):
+            return ("0-0", stale, [])
+
+        fake.xautoclaim = xautoclaim
+
+        await test_daemon._reclaim_stale_commands()
+
+        assert len(test_daemon.commands_handled) == 1
+        assert test_daemon.commands_handled[0]["command_type"] == "open_gate"
+        # Successful handling ACKs → counter cleared
+        assert "5-0" not in test_daemon._redelivery_counts
+
+    @pytest.mark.asyncio
+    async def test_reclaim_drops_poison_command_after_max(self, test_daemon: TestableDaemon) -> None:
+        """A command that never succeeds is dropped after _max_redeliveries."""
+        await test_daemon.run()
+        test_daemon.set_ack_result(False)
+
+        fake = test_daemon._fake_redis
+        poison = [("6-0", {"command_type": "bad_command", "gate_id": "gate-in-1"})]
+        acked: list[str] = []
+
+        async def xautoclaim(*args, **kwargs):
+            return ("0-0", poison, [])
+
+        async def xack(stream, group, msg_id):
+            acked.append(msg_id)
+
+        fake.xautoclaim = xautoclaim
+        fake.xack = xack
+
+        for _ in range(test_daemon._max_redeliveries + 1):
+            await test_daemon._reclaim_stale_commands()
+
+        # Attempted max times, then dropped with an ACK to stop the loop.
+        assert len(test_daemon.commands_handled) == test_daemon._max_redeliveries
+        assert acked == ["6-0"]
+        assert "6-0" not in test_daemon._redelivery_counts
+
+
 class TestHeartbeat:
     """Test heartbeat publishing."""
 

@@ -1,11 +1,18 @@
 """ARQ worker settings."""
 
+from zoneinfo import ZoneInfo
+
 from arq import cron, func
 from arq.connections import RedisSettings
 
 from shared.config import get_settings
 
 settings = get_settings()
+
+# Cron schedules evaluate in this timezone. Without it they use the host TZ —
+# a UTC container would fire the "02:00 Jakarta" settlement at 09:00 WIB,
+# after the bank's morning cutoff.
+JAKARTA_TZ = ZoneInfo(settings.app_timezone)
 
 
 # Redis connection settings for ARQ
@@ -46,15 +53,20 @@ class BackgroundWorkerSettings:
         func("workers.background.settlement_worker.generate_settlement_file", name="generate_settlement_file"),
         func("workers.background.settlement_uploader.upload_settlement_job", name="upload_settlement_job"),
         func("workers.background.settlement_uploader.poll_settlement_responses", name="poll_settlement_responses"),
+        func("workers.background.settlement_uploader.retry_stalled_settlements", name="retry_stalled_settlements"),
         func("workers.background.cleanup_worker.cleanup_old_sessions", name="cleanup_old_sessions"),
         func("workers.background.cleanup_worker.cleanup_old_snapshots", name="cleanup_old_snapshots"),
         func("workers.background.cleanup_worker.timeout_pending_payments", name="timeout_pending_payments"),
         func("workers.background.notification_worker.send_telegram_alert", name="send_telegram_alert"),
+        func("workers.background.heartbeat_watcher.check_gate_heartbeats", name="check_gate_heartbeats"),
     ]
+
+    # Cron schedules evaluate in this timezone (not the host's).
+    timezone = JAKARTA_TZ
 
     # Cron jobs
     cron_jobs = [
-        # Daily settlement at 2 AM (operational timezone enforced inside the job)
+        # Daily settlement at 2 AM operational time (Asia/Jakarta).
         cron(
             "workers.background.settlement_worker.generate_settlement_file",
             name="generate_settlement_file",
@@ -68,6 +80,14 @@ class BackgroundWorkerSettings:
             name="poll_settlement_responses",
             minute={0, 15, 30, 45},
         ),
+        # Re-enqueue uploads stuck in GENERATED/FAILED (crash before enqueue,
+        # SFTP outage outlasting in-job retries). Idempotent: the upload job
+        # re-checks state before sending.
+        cron(
+            "workers.background.settlement_uploader.retry_stalled_settlements",
+            name="retry_stalled_settlements",
+            minute={7, 37},
+        ),
         # Cleanup old data daily at 3 AM
         cron(
             "workers.background.cleanup_worker.cleanup_old_sessions",
@@ -80,6 +100,13 @@ class BackgroundWorkerSettings:
             "workers.background.cleanup_worker.timeout_pending_payments",
             name="timeout_pending_payments",
             minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+        ),
+        # Page when a gate daemon stops heart-beating (independent of
+        # Prometheus — works on any site with just a Telegram bot token).
+        cron(
+            "workers.background.heartbeat_watcher.check_gate_heartbeats",
+            name="check_gate_heartbeats",
+            minute={2, 12, 22, 32, 42, 52},
         ),
     ]
 

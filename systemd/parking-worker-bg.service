@@ -1,6 +1,9 @@
 [Unit]
 Description=E-Parking Background Worker (ARQ)
-After=network.target redis.service
+# Ubuntu's Redis unit is redis-server.service; workers also hit Postgres
+# (settlement/cleanup jobs) so order on it too.
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
 
 [Service]
 Type=simple

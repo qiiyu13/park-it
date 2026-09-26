@@ -21,6 +21,13 @@ def _reset_loop_bound_singletons():
 
     from shared.redis import RedisClient
 
+    # RedisClient.connect() assigns `self._redis`, creating an INSTANCE
+    # attribute that shadows the class attribute — clearing only the class
+    # attr leaves the next test holding a connection bound to this (now
+    # closed) loop. Drop both.
+    inst = RedisClient._instance
+    if inst is not None:
+        inst.__dict__.pop("_redis", None)
     RedisClient._redis = None
 
     import shared.redis as shared_redis

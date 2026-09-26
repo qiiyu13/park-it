@@ -38,26 +38,46 @@ class EventConsumer:
         logger.info("event_consumer_stopped")
 
     async def _listen(self) -> None:
-        """Listen for Redis pub/sub messages."""
-        await redis_client.connect()
-        pubsub = redis_client.client.pubsub()
-        await pubsub.psubscribe("parking.events.*")
+        """Listen for Redis pub/sub messages, reconnecting on failure.
 
-        try:
-            async for message in pubsub.listen():
+        A single Redis blip used to kill this task permanently while the
+        process stayed "healthy" — every gate event (ticket button, RFID,
+        vehicle detection) then silently stopped being processed until a
+        manual restart. The reconnect loop makes the consumer self-heal.
+        """
+        delay = 1.0
+        while self._running:
+            pubsub = None
+            try:
+                await redis_client.connect()
+                pubsub = redis_client.client.pubsub()
+                await pubsub.psubscribe("parking.events.*")
+                delay = 1.0  # healthy — reset backoff
+
+                async for message in pubsub.listen():
+                    if not self._running:
+                        break
+                    if message["type"] == "pmessage":
+                        channel = message["channel"]
+                        data = message["data"]
+                        await self._handle_message(channel, data)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
                 if not self._running:
                     break
-                if message["type"] == "pmessage":
-                    channel = message["channel"]
-                    data = message["data"]
-                    await self._handle_message(channel, data)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("event_consumer_listen_error", error=str(e))
-        finally:
-            await pubsub.punsubscribe("parking.events.*")
-            await pubsub.close()
+                logger.error(
+                    "event_consumer_listen_error_reconnecting",
+                    error=str(e),
+                    next_retry_s=delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+            finally:
+                if pubsub is not None:
+                    with contextlib.suppress(Exception):
+                        await pubsub.punsubscribe("parking.events.*")
+                        await pubsub.close()
 
     async def _handle_message(self, channel: str, data: str) -> None:
         """Handle a Redis pub/sub message."""

@@ -61,6 +61,7 @@ class GateInDaemon(BaseDaemon):
         self._controller_lock = asyncio.Lock()
         self._poll_task: asyncio.Task | None = None
         self._validating_task: asyncio.Task | None = None
+        self._processing_task: asyncio.Task | None = None
         self._in1_on = False
 
         # Circuit breaker for controller send: if N consecutive send errors,
@@ -378,6 +379,24 @@ class GateInDaemon(BaseDaemon):
         await self.publish_event(
             BaseEvent(event_type="ticket_button_pressed", gate_id=self.gate_id)
         )
+        # PROCESSING is escapeless otherwise: the event is at-most-once
+        # Pub/Sub, IN1/IN2/IN4 are ignored in this state, and nothing
+        # publishes reset — a lost event would leave the gate dead until
+        # `systemctl restart` while the heartbeat reports healthy.
+        self._processing_task = self._spawn_tracked(
+            self._processing_timeout(), name="processing_timeout"
+        )
+
+    async def _processing_timeout(self) -> None:
+        timeout = (self.config.get("gate_open_timeout_s") or 10) * 3
+        await asyncio.sleep(timeout)
+        if self.state == STATE_PROCESSING:
+            logger.warning("processing_timeout_reset", gate_id=self.gate_id)
+            await self.publish_event(
+                BaseEvent(event_type="processing_timeout", gate_id=self.gate_id)
+            )
+            await self._transition(STATE_IDLE)
+            await self._display()
 
     async def _on_rfid_card_read(self, card_number: str, channel: str) -> None:
         """Wiegand card read — notify API to validate member."""

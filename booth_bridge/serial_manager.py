@@ -1,6 +1,7 @@
 """Manages serial connections to booth peripherals."""
 
 import threading
+import time
 
 import serial
 
@@ -91,11 +92,30 @@ class SerialManager:
         logger.info("serial_reconnected", peripheral=peripheral, device=cfg["device"])
         return conn
 
-    def send(self, peripheral: str, data: bytes) -> bytes:
-        """Send data to a peripheral and read response.
+    def send(
+        self,
+        peripheral: str,
+        data: bytes,
+        *,
+        response_timeout_s: float = 1.0,
+        is_complete=None,
+    ) -> bytes:
+        """Send data to a peripheral and read the response.
 
-        Reopens the port once on I/O failure (cable unplug / device reset)
+        Reopens the port once on write failure (cable unplug / device reset)
         instead of failing permanently until the bridge is restarted.
+
+        ``response_timeout_s`` is the *total* budget for the response, and
+        ``is_complete(buf)`` decides whether enough bytes have arrived. The
+        PASSTI reader can stay silent for the whole card-tap window (up to
+        30s for deduct) before answering, and the answer can split across
+        USB reads — so callers doing frame I/O pass both and we accumulate
+        until the frame is whole or the budget runs out. With defaults the
+        behaviour matches the old single-read contract (≈1s wait).
+
+        Retry safety: only a *write* failure re-sends the frame. If the
+        write succeeded but the read failed we must NOT re-send — a deduct
+        frame that already reached the reader would deduct twice.
 
         Holds the per-peripheral lock for the whole reset+write+read window
         so two callers can't garble each other's frames on the same port.
@@ -108,13 +128,48 @@ class SerialManager:
             try:
                 conn.reset_input_buffer()
                 conn.write(data)
-                return conn.read(1024)
             except (serial.SerialException, OSError) as e:
-                logger.warning("serial_send_failed_retrying", peripheral=peripheral, error=str(e))
+                logger.warning("serial_write_failed_retrying", peripheral=peripheral, error=str(e))
                 conn = self._reconnect(peripheral)
                 conn.reset_input_buffer()
                 conn.write(data)
-                return conn.read(1024)
+
+            try:
+                return self._read_response(conn, response_timeout_s, is_complete)
+            except (serial.SerialException, OSError) as e:
+                # Read failed AFTER a successful write: the command may have
+                # executed. Reconnect to resync the port, never re-send.
+                logger.error(
+                    "serial_read_failed_command_may_have_executed",
+                    peripheral=peripheral,
+                    error=str(e),
+                )
+                try:
+                    self._reconnect(peripheral)
+                except Exception:
+                    pass
+                return b""
+
+    @staticmethod
+    def _read_response(conn, response_timeout_s: float, is_complete) -> bytes:
+        """Accumulate reads until the frame is complete or the budget expires."""
+        deadline = time.monotonic() + response_timeout_s
+        buf = b""
+        while True:
+            chunk = conn.read(1024)
+            if chunk:
+                buf += chunk
+                if is_complete is None or is_complete(buf):
+                    return buf
+                continue
+            # Idle chunk: no bytes within the port timeout (~1s).
+            if is_complete is None:
+                return buf  # legacy contract: first empty read ends it
+            if buf:
+                return buf  # partial frame then silence — let the parser fail loudly
+            if time.monotonic() >= deadline:
+                return buf  # response never started
+            time.sleep(0.05)
 
     def write_only(self, peripheral: str, data: bytes) -> int:
         """Send data without waiting for a response.

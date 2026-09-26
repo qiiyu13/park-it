@@ -117,9 +117,14 @@ class RedisClient:
         key: str,
         value: str,
         ex: int | None = None,
+        nx: bool = False,
     ) -> bool:
-        """Set a value in Redis with optional TTL."""
-        return await self.client.set(key, value, ex=ex)
+        """Set a value in Redis with optional TTL.
+
+        ``nx=True`` makes it atomic "set if absent" (returns False when the
+        key already exists) — used as a lock/claim primitive.
+        """
+        return await self.client.set(key, value, ex=ex, nx=nx)
 
     async def delete(self, *keys: str) -> int:
         """Delete keys from Redis."""

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import urllib.error
 import urllib.request
 
 import websockets
@@ -28,12 +29,14 @@ class WebSocketServer:
         api_config: dict | None = None,
         gate_opener=None,
         max_clients: int = 8,
+        outbox=None,
     ) -> None:
         self.serial_manager = serial_manager
         self.port = port
         self._api_config = api_config
         self.gate_opener = gate_opener
         self.max_clients = max_clients
+        self.outbox = outbox
         self._server = None
         self._clients: set = set()
         self._bg_tasks: set = set()
@@ -80,14 +83,32 @@ class WebSocketServer:
         logger.info("ws_server_stopped")
 
     async def _call_api_booth_result(self, payload: dict) -> None:
-        """Call the API booth-result endpoint via urllib (stdlib, no extra deps)."""
+        """Deliver the deduct result to the API durably.
+
+        The card was already debited when this runs, so delivery must survive
+        API blips and bridge restarts: the payload is persisted to the outbox
+        FIRST, the POST is attempted with bounded retries, and only on
+        confirmed success is the outbox entry removed. Leftover entries are
+        re-driven by the outbox drain task in main.py.
+
+        The API side treats a duplicate result as already-processed, so
+        re-POSTing after a lost response is safe.
+        """
         if not self._api_config:
             return
+        api_key = self._api_config["api_key"]
+
+        if self.outbox is not None:
+            try:
+                self.outbox.put(payload)
+            except Exception as e:
+                logger.error("outbox_put_failed", error=str(e))
 
         url = f"{self._api_config['base_url']}/api/payments/emoney/booth-result"
         api_payload = {
             "gate_id": payload.get("gate_id", ""),
             "gate_out_id": payload.get("gate_out_id", 0),
+            "transaction_id": payload.get("transaction_id"),
             "card_number": payload.get("card_number", ""),
             "status": payload["status"],
             "deduct_amount": payload["deduct_amount"],
@@ -95,30 +116,101 @@ class WebSocketServer:
             "balance_after": payload["balance_after"],
             "transaction_counter": payload["transaction_counter"],
             "raw_response_hex": payload["raw_response_hex"],
+            "settlement_payload_hex": payload.get("settlement_payload_hex", ""),
+            "card_type": payload.get("card_type"),
+            "card_type_code": payload.get("card_type_code"),
+            "mid": payload.get("mid"),
+            "tid": payload.get("tid"),
         }
 
-        def _post():
+        def _post(timeout: float):
             data = json.dumps(api_payload).encode()
             req = urllib.request.Request(
                 url,
                 data=data,
                 headers={
                     "Content-Type": "application/json",
-                    "X-API-Key": self._api_config["api_key"],
+                    "X-API-Key": api_key,
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, resp.read().decode()
 
-        try:
-            status = await asyncio.to_thread(_post)
+        # Bounded in-process retries only cover short API blips; anything
+        # longer stays in the outbox for the drain task.
+        for attempt, delay in enumerate((0.0, 1.0, 3.0), start=1):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                status, body = await asyncio.to_thread(_post, 10.0)
+            except Exception as e:
+                logger.warning(
+                    "booth_api_call_retry",
+                    attempt=attempt,
+                    status=payload["status"],
+                    error=str(e),
+                )
+                continue
             if status == 200:
+                self._ack_outbox(payload)
                 logger.info("booth_api_call_success", status=payload["status"])
-            else:
-                logger.error("booth_api_call_failed", status=status)
+                return
+            if 400 <= status < 500:
+                # Deterministic rejection (bad payload / auth) — retrying
+                # won't help. Log loudly but stop; the drain task will keep
+                # trying so the record isn't silently dropped.
+                logger.error("booth_api_call_rejected", status=status, body=body[:500])
+                return
+            logger.warning("booth_api_call_server_error", status=status)
+        logger.error(
+            "booth_api_call_exhausted_left_in_outbox",
+            status=payload["status"],
+            transaction_id=payload.get("transaction_id"),
+        )
+
+    def _ack_outbox(self, payload: dict) -> None:
+        if self.outbox is None:
+            return
+        try:
+            self.outbox.remove(payload)
         except Exception as e:
-            logger.error("booth_api_call_exception", error=str(e))
+            logger.error("outbox_remove_failed", error=str(e))
+
+    async def _open_gate_after_payment(self) -> None:
+        """Open the barrier after a paid exit, retrying once.
+
+        A USB hiccup here means money taken + barrier shut. One retry after
+        a short delay covers transient serial errors; if it still fails we
+        broadcast an explicit failure so the POS shows it instead of the
+        operator staring at a barrier that never opens.
+        """
+        opened = await self.gate_opener.open()
+        if not opened:
+            logger.warning("gate_open_after_payment_failed_retrying")
+            await asyncio.sleep(1.0)
+            opened = await self.gate_opener.open()
+        if not opened:
+            logger.error("gate_open_after_payment_failed")
+            await self.broadcast({"event": "gate_open_failed", "source": "emoney"})
+
+    def _post_booth_result_sync(self, payload: dict) -> tuple[int, str]:
+        """Synchronous POST used by the outbox drain task."""
+        if not self._api_config:
+            raise RuntimeError("API config not set")
+        url = f"{self._api_config['base_url']}/api/payments/emoney/booth-result"
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-API-Key": self._api_config["api_key"],
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, resp.read().decode()
 
     async def _handle_client(self, websocket, path=None):
         """Handle a client connection."""
@@ -202,24 +294,40 @@ class WebSocketServer:
             # multi-second wall time; run it on a thread so heartbeat,
             # other WS clients, and supervisor tasks keep advancing.
             from protocols.passti.commands import cmd_check_balance
+            from protocols.passti.frame import is_complete_frame, trim_to_frame
+
             frame = cmd_check_balance(timeout_sec=10)
             response = await asyncio.to_thread(
-                self.serial_manager.send, "emoney_reader", frame
+                self.serial_manager.send,
+                "emoney_reader",
+                frame,
+                response_timeout_s=15.0,
+                is_complete=is_complete_frame,
             )
+            response = trim_to_frame(response)
             return {"status": True, "data": response.hex()}
 
         elif action == "emoney_deduct":
             amount = cmd.get("amount", 0)
             gate_id = cmd.get("gate_id", "")
             gate_out_id = cmd.get("gate_out_id", 0)
+            transaction_id = cmd.get("transaction_id")
 
             from protocols.passti.commands import cmd_deduct, parse_deduct_response
-            from protocols.passti.frame import parse_response
+            from protocols.passti.frame import is_complete_frame, parse_response, trim_to_frame
 
             frame = cmd_deduct(amount, timeout_sec=30)
+            # The reader stays silent for the whole card-tap window (≤30s)
+            # before answering, and the answer can split across USB reads —
+            # accumulate until the frame is complete or the budget expires.
             raw_response = await asyncio.to_thread(
-                self.serial_manager.send, "emoney_reader", frame
+                self.serial_manager.send,
+                "emoney_reader",
+                frame,
+                response_timeout_s=35.0,
+                is_complete=is_complete_frame,
             )
+            raw_response = trim_to_frame(raw_response)
 
             parsed = parse_response(raw_response)
             if "error" in parsed:
@@ -253,25 +361,46 @@ class WebSocketServer:
                     "raw_response_hex": parsed.get("raw", raw_response.hex()),
                 }
 
+            # QR responses carry no card number (they use trx_id) — fall back
+            # so the API schema's min_length=4 doesn't reject the record and
+            # strand the charge in the outbox.
+            card_id = (
+                deduct_data.get("card_number")
+                or deduct_data.get("trx_id")
+                or "QRUNKNOWN"
+            )[:32]
+
             result_payload = {
                 "action": "emoney_deduct_result",
                 "status": deduct_status,
-                "card_number": deduct_data.get("card_number", ""),
+                "card_number": card_id,
                 "deduct_amount": deduct_data.get("deducted", 0),
                 "balance_before": deduct_data.get("remaining", 0) + deduct_data.get("deducted", 0),
                 "balance_after": deduct_data.get("remaining", 0),
                 "transaction_counter": deduct_data.get("trans_counter", 0),
                 "raw_response_hex": parsed.get("raw", raw_response.hex()),
+                # Settlement-critical fields (Multibank v1.3): the deduct body
+                # cardtype..CardLog, card type, and the reader's MID/TID so the
+                # API can link the row to an EmoneyReader for file grouping.
+                "settlement_payload_hex": parsed.get("body_hex", ""),
+                "card_type": deduct_data.get("card_type"),
+                "card_type_code": deduct_data.get("card_type_code"),
+                "mid": deduct_data.get("mid"),
+                "tid": deduct_data.get("tid"),
+                "transaction_id": transaction_id,
                 "gate_id": gate_id,
                 "gate_out_id": gate_out_id,
             }
 
+            # Deliver the money record BEFORE opening the barrier: if this
+            # process dies in between, the outbox still holds the charge.
+            # ALL statuses go to the API — failures clear the pending arm
+            # state server-side; SUCCESS completes the transaction.
             if self._api_config:
                 self._spawn(self._call_api_booth_result(result_payload), name="api_booth_result")
 
-            # Auto-open relay on SUCCESS only; broadcast result to all POS clients
             if deduct_status == "SUCCESS" and self.gate_opener is not None:
-                self._spawn(self.gate_opener.open(), name="gate_opener_open")
+                self._spawn(self._open_gate_after_payment(), name="gate_opener_open")
 
             broadcast_event = (
                 "emoney_payment_completed" if deduct_status == "SUCCESS"

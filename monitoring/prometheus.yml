@@ -19,7 +19,12 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []  # set to your Alertmanager host:port, e.g. ["localhost:9093"]
+        # Empty = these rules evaluate but notify nobody. Set to your
+        # Alertmanager (e.g. ["localhost:9093"]) to activate them. Primary
+        # alerting does NOT depend on this: the background worker's
+        # heartbeat_watcher + settlement alerts go straight to Telegram
+        # with only TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env.
+        - targets: []  # e.g. ["localhost:9093"]
 
 scrape_configs:
   - job_name: parking-api
