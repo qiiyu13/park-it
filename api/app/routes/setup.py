@@ -215,14 +215,17 @@ async def enroll_booth(
 
     client = request.client.host if request.client else "unknown"
     logger.info("booth_enrolled", source_ip=client)
-    # The server's own .env has REDIS_HOST=localhost, useless to a remote booth.
-    # Hand back the address the booth used to reach us instead.
-    server_host = request.url.hostname or settings.redis_host
+    # The server's own .env has REDIS_HOST=localhost, useless to a remote
+    # booth — and booths never use Redis anyway (booth_bridge is HTTP-only).
+    # Base URL deliberately omits the port: parking-api binds 127.0.0.1:8000,
+    # so booths must reach it through nginx on :80. Honor a non-80 port only
+    # if the enrollment request itself arrived on one (proxy/dev setups).
+    server_host = request.url.hostname or "127.0.0.1"
+    port = request.url.port
+    base = f"http://{server_host}" if port in (80, None) else f"http://{server_host}:{port}"
     return EnrollResponse(
-        api_base_url=f"http://{server_host}:8000",
+        api_base_url=base,
         internal_api_key=settings.internal_api_key,
-        redis_host=server_host,
-        redis_port=settings.redis_port,
     )
 
 

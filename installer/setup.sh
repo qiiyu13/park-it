@@ -17,11 +17,13 @@ ROLES_DIR="$HERE/_roles"
 
 ROLE=""
 PASSTHROUGH=()
+NON_INTERACTIVE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --role) ROLE="$2"; shift ;;
     --role=*) ROLE="${1#*=}" ;;
+    --non-interactive) NON_INTERACTIVE=true; PASSTHROUGH+=("$1") ;;
     -h|--help)
       sed -n '1,15p' "$0"
       exit 0
@@ -37,6 +39,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if [[ -z "$ROLE" ]]; then
+  if $NON_INTERACTIVE; then
+    echo "--non-interactive requires --role server|booth|combo" >&2
+    exit 2
+  fi
   echo
   echo "==== E-Parking v2 Installer ===="
   echo "  1) server   — full backend (DB, API, frontend, workers, nginx)"

@@ -19,6 +19,12 @@ class EventConsumer:
     def __init__(self) -> None:
         self._running = False
         self._task: asyncio.Task | None = None
+        self._beat_task: asyncio.Task | None = None
+        # Last time psubscribe succeeded — the heartbeat only beats while
+        # the subscribe loop is genuinely healthy, so parking-doctor's
+        # "Event consumer alive" check catches a silently dead loop, not
+        # just a live process.
+        self._last_sub_ok: float = 0.0
 
     async def start(self) -> None:
         """Start the Redis pub/sub listener."""
@@ -26,16 +32,36 @@ class EventConsumer:
             return
         self._running = True
         self._task = asyncio.create_task(self._listen())
+        self._beat_task = asyncio.create_task(self._heartbeat())
         logger.info("event_consumer_started")
 
     async def stop(self) -> None:
         """Stop the Redis pub/sub listener."""
         self._running = False
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        for task in (self._task, self._beat_task):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         logger.info("event_consumer_stopped")
+
+    async def _heartbeat(self) -> None:
+        """Write heartbeat:event-consumer (TTL 90s) every 30s — but only
+        while the subscribe loop has succeeded within the last 2 minutes."""
+        import time as _time
+
+        while self._running:
+            try:
+                if self._last_sub_ok and (_time.monotonic() - self._last_sub_ok) < 120:
+                    await redis_client.connect()
+                    await redis_client.set("heartbeat:event-consumer", "1", ex=90)
+                else:
+                    with contextlib.suppress(Exception):
+                        await redis_client.connect()
+                        await redis_client.delete("heartbeat:event-consumer")
+            except Exception as e:
+                logger.warning("event_consumer_heartbeat_error", error=str(e))
+            await asyncio.sleep(30)
 
     async def _listen(self) -> None:
         """Listen for Redis pub/sub messages, reconnecting on failure.
@@ -53,6 +79,9 @@ class EventConsumer:
                 pubsub = redis_client.client.pubsub()
                 await pubsub.psubscribe("parking.events.*")
                 delay = 1.0  # healthy — reset backoff
+                import time as _time
+
+                self._last_sub_ok = _time.monotonic()
 
                 async for message in pubsub.listen():
                     if not self._running:

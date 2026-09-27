@@ -24,6 +24,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/../common.sh"
 
+NON_INTERACTIVE=false
+GATE_CODE_FLAG=""
+for arg in "$@"; do
+    case "$arg" in
+        --non-interactive) NON_INTERACTIVE=true ;;
+        --gate-code=*) GATE_CODE_FLAG="${arg#*=}" ;;
+        -h|--help) sed -n '6,20p' "$0"; exit 0 ;;
+        *) error "unknown arg: $arg"; exit 2 ;;
+    esac
+done
+
 # ── 0. Preflight ────────────────────────────────────────────────────────────────
 step "0/2 — Preflight Checks"
 
@@ -38,7 +49,9 @@ info "This script will:"
 echo "  1. Install the full server stack (PostgreSQL, Redis, API, nginx)"
 echo "  2. Configure this PC as Booth 1 with local serial devices"
 echo ""
-read -rp "Press Enter to continue or Ctrl+C to abort..."
+if ! $NON_INTERACTIVE; then
+    read -rp "Press Enter to continue or Ctrl+C to abort..."
+fi
 
 # ── 1. Run server installer ─────────────────────────────────────────────────────
 step "1/2 — Installing Server Stack"
@@ -49,8 +62,12 @@ if [[ ! -f "$SERVER_SETUP" ]]; then
     exit 1
 fi
 
-# Pass through to server installer
-bash "$SERVER_SETUP"
+# Pass through (e.g. --non-interactive) so both halves behave identically.
+if $NON_INTERACTIVE; then
+    bash "$SERVER_SETUP" --non-interactive
+else
+    bash "$SERVER_SETUP"
+fi
 ok "Server installation complete"
 
 # ── 2. Run local booth installer ────────────────────────────────────────────────
@@ -60,17 +77,38 @@ info "Now configuring this PC as Booth 1..."
 echo ""
 
 # Gather booth-specific config
-read -rp "Booth 1 name [Booth 1]: " BOOTH_NAME
-BOOTH_NAME=${BOOTH_NAME:-Booth 1}
+if $NON_INTERACTIVE; then
+    BOOTH_NAME="Booth 1"
+    BOOTH_CODE="BOOTH_01"
+    GATE_CODE="$GATE_CODE_FLAG"
+    if [[ -z "$GATE_CODE" ]]; then
+        error "--non-interactive requires --gate-code=GOUT-01 (default gate for Booth 1)"
+        exit 1
+    fi
+else
+    read -rp "Booth 1 name [Booth 1]: " BOOTH_NAME
+    BOOTH_NAME=${BOOTH_NAME:-Booth 1}
 
-read -rp "Booth 1 code [BOOTH_01]: " BOOTH_CODE
-BOOTH_CODE=${BOOTH_CODE:-BOOTH_01}
+    read -rp "Booth 1 code [BOOTH_01]: " BOOTH_CODE
+    BOOTH_CODE=${BOOTH_CODE:-BOOTH_01}
 
-read -rp "Default gate for Booth 1 (e.g. GOUT-01): " GATE_CODE
-if [[ -z "$GATE_CODE" ]]; then
-    error "Default gate code is required"
-    exit 1
+    read -rp "Default gate for Booth 1 (e.g. GOUT-01): " GATE_CODE
+    if [[ -z "$GATE_CODE" ]]; then
+        error "Default gate code is required"
+        exit 1
+    fi
 fi
+
+# Codes feed a systemd unit filename and a JSON heredoc — reject anything
+# that would break either (quotes, spaces, slashes).
+validate_code() {
+    if [[ ! "$2" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        error "$1 must be alphanumeric/dash/underscore only (got: '$2')"
+        exit 1
+    fi
+}
+validate_code "Booth code" "$BOOTH_CODE"
+validate_code "Gate code" "$GATE_CODE"
 
 # ── Stable serial device detection ────────────────────────────────────────────
 # Pin /dev/parking-{emoney,printer,scanner,gate} symlinks by serial#/USB-port
@@ -93,6 +131,11 @@ resolve_dev() {
         printf '%s' "$link"
         return
     fi
+    if $NON_INTERACTIVE; then
+        warn "${label}: no ${link} symlink — using ${fallback} (configure later)." >&2
+        printf '%s' "$fallback"
+        return
+    fi
     warn "${label}: no ${link} symlink — enter the device path manually." >&2
     local ans
     read -rp "    ${label} serial device [${fallback}]: " ans </dev/tty
@@ -100,30 +143,36 @@ resolve_dev() {
 }
 
 EMONEY_DEV=$(resolve_dev emoney "E-Money reader" /dev/ttyUSB0)
-read -rp "E-Money reader baudrate [38400]: " EMONEY_BAUD
-EMONEY_BAUD=${EMONEY_BAUD:-38400}
-
 PRINTER_DEV=$(resolve_dev printer "Receipt printer" /dev/ttyUSB1)
-read -rp "Receipt printer baudrate [9600]: " PRINTER_BAUD
-PRINTER_BAUD=${PRINTER_BAUD:-9600}
-
 SCANNER_DEV=$(resolve_dev scanner "Barcode scanner" /dev/ttyUSB2)
-read -rp "Barcode scanner baudrate [9600]: " SCANNER_BAUD
-SCANNER_BAUD=${SCANNER_BAUD:-9600}
 
-read -rp "Barrier gate connection type (tcp/serial) [tcp]: " GATE_TYPE
-GATE_TYPE=${GATE_TYPE:-tcp}
-
+EMONEY_BAUD=38400
+PRINTER_BAUD=9600
+SCANNER_BAUD=9600
+GATE_TYPE="tcp"
 GATE_DEV=""
 GATE_BAUD=9600
-if [[ "$GATE_TYPE" == "serial" ]]; then
-    GATE_DEV=$(resolve_dev gate "Barrier gate" /dev/ttyUSB3)
-    read -rp "Barrier gate baudrate [9600]: " GATE_BAUD_INPUT
-    GATE_BAUD=${GATE_BAUD_INPUT:-9600}
-fi
+AUTO_LOGIN="n"
 
-read -rp "Enable auto-login for operator? [y/N]: " AUTO_LOGIN
-AUTO_LOGIN=${AUTO_LOGIN:-n}
+if ! $NON_INTERACTIVE; then
+    read -rp "E-Money reader baudrate [38400]: " EMONEY_BAUD_IN
+    EMONEY_BAUD=${EMONEY_BAUD_IN:-38400}
+    read -rp "Receipt printer baudrate [9600]: " PRINTER_BAUD_IN
+    PRINTER_BAUD=${PRINTER_BAUD_IN:-9600}
+    read -rp "Barcode scanner baudrate [9600]: " SCANNER_BAUD_IN
+    SCANNER_BAUD=${SCANNER_BAUD_IN:-9600}
+
+    read -rp "Barrier gate connection type (tcp/serial) [tcp]: " GATE_TYPE_IN
+    GATE_TYPE=${GATE_TYPE_IN:-tcp}
+    if [[ "$GATE_TYPE" == "serial" ]]; then
+        GATE_DEV=$(resolve_dev gate "Barrier gate" /dev/ttyUSB3)
+        read -rp "Barrier gate baudrate [9600]: " GATE_BAUD_INPUT
+        GATE_BAUD=${GATE_BAUD_INPUT:-9600}
+    fi
+
+    read -rp "Enable auto-login for operator? [y/N]: " AUTO_LOGIN_IN
+    AUTO_LOGIN=${AUTO_LOGIN_IN:-n}
+fi
 
 PROJECT_ROOT="/opt/parking-system-v2"
 
@@ -366,9 +415,14 @@ fi
 echo "  7. Open Parking POS shortcut on this PC to test Booth 1"
 echo ""
 
-# ── Post-install diagnostic ───────────────────────────────────────────────────
-step "Post-install — parking-doctor"
-info "Running field diagnostic (non-fatal)..."
-sudo -u parking "${PROJECT_ROOT}/.venv/bin/python" "${PROJECT_ROOT}/scripts/parking_doctor.py" \
-    || warn "parking-doctor reported issues — gates/POS get configured in the wizard (steps above)."
+# ── Post-install verification (HARD GATE) ────────────────────────────────────
+step "Post-install — parking-doctor (infrastructure gate)"
+cd "$PROJECT_ROOT"
+if sudo -u parking "${PROJECT_ROOT}/.venv/bin/python" "${PROJECT_ROOT}/scripts/parking_doctor.py" --infra-only; then
+    ok "INSTALL VERIFIED — infrastructure checks green (gates/POS configured in the wizard, steps above)."
+else
+    error "INSTALL FAILED VERIFICATION — see the FAIL rows above."
+    error "Fix them, then re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/parking_doctor.py --infra-only"
+    exit 1
+fi
 echo ""

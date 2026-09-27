@@ -146,6 +146,13 @@ class Settings(BaseSettings):
         default="/opt/parking-system-v2", alias="PARKING_INSTALL_ROOT"
     )
 
+    # "server" = full stack (DB + JWT issued here). "booth" = booth PC
+    # (booth_bridge only — HTTP + API key, no DB, no JWT). The production
+    # validator skips DB/JWT requirements for booths; without this, a booth's
+    # minimal .env failed validation (dev-secret/parking_secret defaults) and
+    # the bridge could never boot under APP_ENV=production.
+    service_role: str = Field(default="server", alias="SERVICE_ROLE")
+
     @model_validator(mode="after")
     def _validate_production_settings(self) -> "Settings":
         """Ensure critical settings are configured in production."""
@@ -155,20 +162,26 @@ class Settings(BaseSettings):
                     "INTERNAL_API_KEY must be set in production — "
                     "booth bridge endpoints will be unprotected without it"
                 )
-            # Reject placeholders, not just literals: the shipped .env values
-            # ("change-me-in-production-...") passed the old check and would
-            # have signed every session token in production.
-            if _is_placeholder_secret(self.jwt_secret):
-                raise ValueError("JWT_SECRET must be changed from default in production")
+            # Booths neither open DB connections nor sign tokens; only the
+            # API key matters there.
+            if self.service_role != "booth":
+                # Reject placeholders, not just literals: the shipped .env values
+                # ("change-me-in-production-...") passed the old check and would
+                # have signed every session token in production.
+                if _is_placeholder_secret(self.jwt_secret):
+                    raise ValueError("JWT_SECRET must be changed from default in production")
+                if _is_placeholder_secret(self.db_password) or self.db_password in (
+                    "parking_secret",
+                    "",
+                ):
+                    raise ValueError(
+                        "DB_PASSWORD must be changed from default in production"
+                    )
             if _is_placeholder_secret(self.internal_api_key):
                 raise ValueError(
                     "INTERNAL_API_KEY must be changed from the .env.example "
                     "placeholder in production"
                 )
-            if self.db_password in ("parking_secret", "") or _is_placeholder_secret(
-                self.db_password
-            ):
-                raise ValueError("DB_PASSWORD must be changed from default in production")
             # If settlement SFTP is configured, require host-key verification —
             # an empty known_hosts disables it and leaves the money path open to MITM.
             if self.settlement_sftp_host and not self.settlement_sftp_known_hosts:

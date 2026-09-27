@@ -13,6 +13,12 @@ set -euo pipefail
 #                     systemd service, kiosk shortcut.
 #   (no flag)         Run both (single-visit install, original behaviour).
 #
+#   --non-interactive      No prompts (requires --server-ip and --token for
+#                          the configure phase; other values use defaults).
+#   --server-ip=IP         Server address (non-interactive configure).
+#   --token=ENROLL_TOKEN   Enrollment token from the server installer.
+#   --gate-code=GOUT-01    Default gate (optional).
+#
 # Usage:
 #   sudo ./setup.sh                  # install + configure
 #   sudo ./setup.sh --install-only   # workshop
@@ -28,11 +34,23 @@ source "$SCRIPT_DIR/../common.sh"
 
 DO_INSTALL=true
 DO_CONFIGURE=true
+NON_INTERACTIVE=false
+NI_SERVER_IP=""
+NI_TOKEN=""
+NI_GATE_CODE=""
+NI_BOOTH_CODE="BOOTH"
+NI_BOOTH_NAME="Booth"
 for arg in "$@"; do
     case "$arg" in
         --install-only)   DO_CONFIGURE=false ;;
         --configure-only) DO_INSTALL=false ;;
-        -h|--help)        sed -n '4,22p' "$0"; exit 0 ;;
+        --non-interactive) NON_INTERACTIVE=true ;;
+        --server-ip=*)    NI_SERVER_IP="${arg#*=}" ;;
+        --token=*)        NI_TOKEN="${arg#*=}" ;;
+        --gate-code=*)    NI_GATE_CODE="${arg#*=}" ;;
+        --booth-code=*)   NI_BOOTH_CODE="${arg#*=}" ;;
+        --booth-name=*)   NI_BOOTH_NAME="${arg#*=}" ;;
+        -h|--help)        sed -n '4,24p' "$0"; exit 0 ;;
         *) error "unknown arg: $arg"; exit 2 ;;
     esac
 done
@@ -48,7 +66,9 @@ fi
 if ! grep -q "Ubuntu 24.04" /etc/os-release 2>/dev/null; then
     warn "This script targets Ubuntu 24.04 LTS (ships python3.12 natively). Continuing anyway..."
     warn "On 22.04 the python3.12 packages below are NOT in the default repos and install will fail."
-    read -rp "Press Enter to continue or Ctrl+C to abort..."
+    if ! $NON_INTERACTIVE; then
+        read -rp "Press Enter to continue or Ctrl+C to abort..."
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -57,8 +77,10 @@ fi
 phase_install() {
     step "Install 1/4 — System Packages"
 
-    read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
-    REPO_URL=${INPUT_REPO:-$REPO_URL}
+    if ! $NON_INTERACTIVE; then
+        read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
+        REPO_URL=${INPUT_REPO:-$REPO_URL}
+    fi
     if [[ "$REPO_URL" == *your-org* ]]; then
         error "REPO_URL is still the placeholder (your-org). Enter the real repository URL."
         exit 1
@@ -117,7 +139,14 @@ EOF
     if [[ -d "$PROJECT_ROOT/.git" ]]; then
         warn "Repository already exists. Pulling latest..."
         cd "$PROJECT_ROOT"
-        sudo -u parking git pull origin main
+        # Branch-aware + ff-only: never clobber a fix/* checkout with main.
+        current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+        if [[ "$current_branch" == "HEAD" ]]; then
+            warn "Detached HEAD — skipping pull, installing this exact checkout."
+        else
+            sudo -u parking git pull --ff-only origin "$current_branch" \
+                || warn "git pull failed (diverged/local changes) — continuing with existing checkout."
+        fi
     else
         rm -rf "$PROJECT_ROOT"
         git clone "$REPO_URL" "$PROJECT_ROOT"
@@ -151,55 +180,88 @@ phase_configure() {
 
     step "Configure 1/4 — Site Configuration"
 
-    read -rp "Server IP address (e.g. 192.168.1.100): " SERVER_IP
-    if [[ -z "$SERVER_IP" ]]; then
-        error "Server IP is required"
-        exit 1
+    if $NON_INTERACTIVE; then
+        SERVER_IP="$NI_SERVER_IP"
+        ENROLL_TOKEN="$NI_TOKEN"
+        if [[ -z "$SERVER_IP" || -z "$ENROLL_TOKEN" ]]; then
+            error "--non-interactive requires --server-ip=IP and --token=ENROLL_TOKEN"
+            exit 1
+        fi
+    else
+        read -rp "Server IP address (e.g. 192.168.1.100): " SERVER_IP
+        if [[ -z "$SERVER_IP" ]]; then
+            error "Server IP is required"
+            exit 1
+        fi
     fi
 
     # Enroll over the network: the server prints an enrollment token at the end
-    # of its install. We redeem it for the INTERNAL_API_KEY + Redis address
-    # instead of hand-copying the key (typos there = silent 401 at runtime).
-    read -rp "Server enrollment token (printed by the server installer): " ENROLL_TOKEN
+    # of its install. We redeem it for the INTERNAL_API_KEY instead of
+    # hand-copying the key (typos there = silent 401 at runtime).
+    #
+    # Port 80 (nginx), NOT 8000: parking-api binds 127.0.0.1:8000 on the
+    # server, so any URL with :8000 is connection-refused from this machine.
+    if ! $NON_INTERACTIVE; then
+        read -rp "Server enrollment token (printed by the server installer): " ENROLL_TOKEN
+    fi
     if [[ -z "$ENROLL_TOKEN" ]]; then
         error "Enrollment token is required — get it from the server install summary or run scripts/regen-enroll-token.sh on the server."
         exit 1
     fi
 
-    ENROLL_URL="http://${SERVER_IP}:8000/api/setup/enroll"
+    ENROLL_URL="http://${SERVER_IP}/api/setup/enroll"
     info "Enrolling with ${ENROLL_URL} ..."
     ENROLL_JSON=$(curl -fsS -X POST "$ENROLL_URL" \
         -H "Content-Type: application/json" \
         -d "{\"token\":\"${ENROLL_TOKEN}\"}" 2>/dev/null) || {
         error "Enrollment failed — server unreachable or token invalid (HTTP error from ${ENROLL_URL})."
-        error "Check the server IP, that parking-api is up, and the token is current (24h)."
+        error "Check the server IP, that nginx + parking-api are up on the server, and the token is current (24h)."
         exit 1
     }
 
     # Parse the JSON response (no jq dependency).
     INTERNAL_API_KEY=$(python3 -c 'import sys,json; print(json.load(sys.stdin)["internal_api_key"])' <<<"$ENROLL_JSON" 2>/dev/null || true)
-    REDIS_HOST_FROM_ENROLL=$(python3 -c 'import sys,json; print(json.load(sys.stdin).get("redis_host",""))' <<<"$ENROLL_JSON" 2>/dev/null || true)
     API_BASE_URL=$(python3 -c 'import sys,json; print(json.load(sys.stdin).get("api_base_url",""))' <<<"$ENROLL_JSON" 2>/dev/null || true)
     if [[ -z "$INTERNAL_API_KEY" ]]; then
         error "Enrollment response had no internal_api_key. Raw response: ${ENROLL_JSON}"
         exit 1
     fi
-    ok "Enrolled — received API key + Redis address from server"
+    ok "Enrolled — received API key from server"
 
-    read -rp "Booth name (e.g. Booth 2): " BOOTH_NAME
-    BOOTH_NAME=${BOOTH_NAME:-Booth}
-
-    read -rp "Booth code (e.g. BOOTH_02): " BOOTH_CODE
-    BOOTH_CODE=${BOOTH_CODE:-BOOTH}
-
-    read -rp "Booth PC IP address (for auto-detection): " BOOTH_IP
-    if [[ -z "$BOOTH_IP" ]]; then
+    if $NON_INTERACTIVE; then
+        BOOTH_NAME="$NI_BOOTH_NAME"
+        BOOTH_CODE="$NI_BOOTH_CODE"
+        GATE_CODE="$NI_GATE_CODE"
         BOOTH_IP=$(hostname -I | awk '{print $1}')
-        warn "Auto-detected booth IP: ${BOOTH_IP}"
+    else
+        read -rp "Booth name (e.g. Booth 2): " BOOTH_NAME
+        BOOTH_NAME=${BOOTH_NAME:-Booth}
+
+        read -rp "Booth code (e.g. BOOTH_02): " BOOTH_CODE
+        BOOTH_CODE=${BOOTH_CODE:-BOOTH}
+
+        read -rp "Booth PC IP address (for auto-detection): " BOOTH_IP
+        if [[ -z "$BOOTH_IP" ]]; then
+            BOOTH_IP=$(hostname -I | awk '{print $1}')
+            warn "Auto-detected booth IP: ${BOOTH_IP}"
+        fi
+
+        read -rp "Default gate code for this booth (e.g. GOUT-02): " GATE_CODE
+        GATE_CODE=${GATE_CODE:-}
     fi
 
-    read -rp "Default gate code for this booth (e.g. GOUT-02): " GATE_CODE
-    GATE_CODE=${GATE_CODE:-}
+    # Codes feed a systemd unit filename and a JSON heredoc — reject anything
+    # that would break either (quotes, spaces, slashes).
+    if [[ ! "$BOOTH_CODE" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        error "Booth code must be alphanumeric/dash/underscore only (got: '$BOOTH_CODE')"
+        exit 1
+    fi
+    if [[ -n "$GATE_CODE" && ! "$GATE_CODE" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        error "Gate code must be alphanumeric/dash/underscore only (got: '$GATE_CODE')"
+        exit 1
+    fi
+    # Strip quotes/backslashes from the free-text name so the JSON stays valid.
+    BOOTH_NAME="${BOOTH_NAME//\"/}"; BOOTH_NAME="${BOOTH_NAME//\\/}"
 
     # ── Stable serial device detection ────────────────────────────────────────
     # Instead of guessing /dev/ttyUSB0/1/2 (which renumber on reboot/replug),
@@ -225,6 +287,11 @@ phase_configure() {
             printf '%s' "$link"
             return
         fi
+        if $NON_INTERACTIVE; then
+            warn "${label}: no ${link} symlink — using ${fallback} (run detect-serial-devices.sh to fix)." >&2
+            printf '%s' "$fallback"
+            return
+        fi
         warn "${label}: no ${link} symlink — enter the device path manually." >&2
         local ans
         read -rp "    ${label} serial device [${fallback}]: " ans </dev/tty
@@ -232,22 +299,31 @@ phase_configure() {
     }
 
     EMONEY_DEV=$(resolve_dev emoney "E-Money reader" /dev/ttyUSB0)
-    read -rp "E-Money reader baudrate [38400]: " EMONEY_BAUD
-    EMONEY_BAUD=${EMONEY_BAUD:-38400}
-
     PRINTER_DEV=$(resolve_dev printer "Receipt printer" /dev/ttyUSB1)
-    read -rp "Receipt printer baudrate [9600]: " PRINTER_BAUD
-    PRINTER_BAUD=${PRINTER_BAUD:-9600}
-
     SCANNER_DEV=$(resolve_dev scanner "Barcode scanner" /dev/ttyUSB2)
-    read -rp "Barcode scanner baudrate [9600]: " SCANNER_BAUD
-    SCANNER_BAUD=${SCANNER_BAUD:-9600}
 
-    read -rp "Enable auto-login for operator? [y/N]: " AUTO_LOGIN
-    AUTO_LOGIN=${AUTO_LOGIN:-n}
+    EMONEY_BAUD=38400
+    PRINTER_BAUD=9600
+    SCANNER_BAUD=9600
+    AUTO_LOGIN="n"
+    HAS_SERIAL_GATE="n"
 
-    read -rp "Does this booth PC have a RS232/USB barrier gate (Interface Barrier Gate)? [y/N]: " HAS_SERIAL_GATE
-    HAS_SERIAL_GATE=${HAS_SERIAL_GATE:-n}
+    if ! $NON_INTERACTIVE; then
+        read -rp "E-Money reader baudrate [38400]: " EMONEY_BAUD_IN
+        EMONEY_BAUD=${EMONEY_BAUD_IN:-38400}
+
+        read -rp "Receipt printer baudrate [9600]: " PRINTER_BAUD_IN
+        PRINTER_BAUD=${PRINTER_BAUD_IN:-9600}
+
+        read -rp "Barcode scanner baudrate [9600]: " SCANNER_BAUD_IN
+        SCANNER_BAUD=${SCANNER_BAUD_IN:-9600}
+
+        read -rp "Enable auto-login for operator? [y/N]: " AUTO_LOGIN_IN
+        AUTO_LOGIN=${AUTO_LOGIN_IN:-n}
+
+        read -rp "Does this booth PC have a RS232/USB barrier gate (Interface Barrier Gate)? [y/N]: " HAS_SERIAL_GATE_IN
+        HAS_SERIAL_GATE=${HAS_SERIAL_GATE_IN:-n}
+    fi
 
     SERIAL_GATE_CODE=""
     GATE_DEV="/dev/parking-gate"
@@ -256,6 +332,10 @@ phase_configure() {
         read -rp "Gate code in DB (e.g. GOUT-02 — must match gate configured with protocol=serial): " SERIAL_GATE_CODE
         if [[ -z "$SERIAL_GATE_CODE" ]]; then
             error "Gate code is required for RS232/USB gate"
+            exit 1
+        fi
+        if [[ ! "$SERIAL_GATE_CODE" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            error "Gate code must be alphanumeric/dash/underscore only (got: '$SERIAL_GATE_CODE')"
             exit 1
         fi
         GATE_DEV=$(resolve_dev gate "Barrier gate" /dev/ttyUSB3)
@@ -273,7 +353,7 @@ phase_configure() {
   "code": "${BOOTH_CODE}",
   "ip_address": "${BOOTH_IP}",
   "default_gate_code": "${GATE_CODE}",
-  "api_base_url": "${API_BASE_URL:-http://${SERVER_IP}:8000}",
+  "api_base_url": "${API_BASE_URL:-http://${SERVER_IP}}",
   "api_key": "${INTERNAL_API_KEY}",
   "peripherals": {
     "emoney_reader": {
@@ -300,27 +380,32 @@ EOF
     chown parking:parking /etc/parking/booth.json
     ok "Booth config written to /etc/parking/booth.json"
 
-    # booth_bridge gate_opener + omnikey_poller reach the server's Redis.
-    # Prefer the Redis address the server told us during enrollment.
-    REDIS_HOST_EFFECTIVE=${REDIS_HOST_FROM_ENROLL:-$SERVER_IP}
+    # booth_bridge talks HTTP only (zero Redis imports) — the old REDIS_HOST
+    # hand-off pointed at a Redis that binds 127.0.0.1 on the server anyway.
+    # API_BASE_URL lets parking-doctor --booth probe the server through nginx.
     ENV_FILE="$PROJECT_ROOT/.env"
     if [[ ! -f "$ENV_FILE" ]]; then
         cat > "$ENV_FILE" <<EOF
-REDIS_HOST=${REDIS_HOST_EFFECTIVE}
-REDIS_PORT=6379
 APP_ENV=production
+SERVICE_ROLE=booth
 INTERNAL_API_KEY=${INTERNAL_API_KEY}
+API_BASE_URL=${API_BASE_URL:-http://${SERVER_IP}}
 EOF
         chown parking:parking "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
     else
-        grep -q "^REDIS_HOST=" "$ENV_FILE" \
-            && sed -i "s|^REDIS_HOST=.*|REDIS_HOST=${REDIS_HOST_EFFECTIVE}|" "$ENV_FILE" \
-            || echo "REDIS_HOST=${REDIS_HOST_EFFECTIVE}" >> "$ENV_FILE"
+        grep -q "^API_BASE_URL=" "$ENV_FILE" \
+            && sed -i "s|^API_BASE_URL=.*|API_BASE_URL=${API_BASE_URL:-http://${SERVER_IP}}|" "$ENV_FILE" \
+            || echo "API_BASE_URL=${API_BASE_URL:-http://${SERVER_IP}}" >> "$ENV_FILE"
         grep -q "^INTERNAL_API_KEY=" "$ENV_FILE" \
             && sed -i "s|^INTERNAL_API_KEY=.*|INTERNAL_API_KEY=${INTERNAL_API_KEY}|" "$ENV_FILE" \
             || echo "INTERNAL_API_KEY=${INTERNAL_API_KEY}" >> "$ENV_FILE"
+        grep -q "^SERVICE_ROLE=" "$ENV_FILE" \
+            || echo "SERVICE_ROLE=booth" >> "$ENV_FILE"
+        # Legacy installs wrote REDIS_HOST — dead config, drop it.
+        sed -i '/^REDIS_HOST=/d; /^REDIS_PORT=/d; /^REDIS_DB=/d' "$ENV_FILE"
     fi
-    ok "REDIS_HOST set to ${REDIS_HOST_EFFECTIVE} in ${ENV_FILE}"
+    ok "API_BASE_URL set to ${API_BASE_URL:-http://${SERVER_IP}} in ${ENV_FILE}"
 
     NOTES_FILE="/etc/parking/install-notes.txt"
     cat > "$NOTES_FILE" <<EOF
@@ -474,11 +559,16 @@ EOF
     echo "  6. Test e-money reader tap and receipt printer"
     echo ""
 
-    # ── Post-install diagnostic ────────────────────────────────────────────────
-    step "Post-install — parking-doctor (booth checks)"
-    info "Verifying serial symlinks + server reachability (non-fatal)..."
-    sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --booth \
-        || warn "parking-doctor flagged issues above — fix before handing the booth over."
+    # ── Post-install verification (HARD GATE) ──────────────────────────────────
+    step "Post-install — parking-doctor (booth gate)"
+    cd "$PROJECT_ROOT"
+    if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --booth; then
+        ok "BOOTH VERIFIED — bridge service, serial symlinks, and server link all green."
+    else
+        error "BOOTH INSTALL FAILED VERIFICATION — see the FAIL rows above."
+        error "Fix, then re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/parking_doctor.py --booth"
+        exit 1
+    fi
     echo ""
 }
 

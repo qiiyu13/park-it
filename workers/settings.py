@@ -40,6 +40,9 @@ class CriticalWorkerSettings:
     job_timeout = 30
     max_jobs = 10  # headroom for concurrent RTSP snapshots
 
+    # 60s health-key refresh (TTL 61s) — see BackgroundWorkerSettings.
+    health_check_interval = 60
+
     handle_signals = True
 
 
@@ -63,6 +66,11 @@ class BackgroundWorkerSettings:
 
     # Cron schedules evaluate in this timezone (not the host's).
     timezone = JAKARTA_TZ
+
+    # Refresh the ARQ health key every 60s (TTL 61s) so parking-doctor and
+    # monitoring detect a dead worker within a minute — the ARQ default of
+    # 1h would stay green for an hour after the worker wedged.
+    health_check_interval = 60
 
     # Cron jobs
     cron_jobs = [

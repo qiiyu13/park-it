@@ -10,7 +10,8 @@ set -euo pipefail
 #   Clones the repo, builds the frontend, installs systemd services.
 #
 # Usage:
-#   sudo ./setup.sh
+#   sudo ./setup.sh                      # interactive
+#   sudo ./setup.sh --non-interactive    # all defaults/generates (CI, unattended)
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -21,6 +22,15 @@ PROJECT_ROOT="/opt/parking-system-v2"
 REPO_URL="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || echo "https://github.com/your-org/parking-system-v2.git")"
 
 source "$SCRIPT_DIR/../common.sh"
+
+NON_INTERACTIVE=false
+for arg in "$@"; do
+    case "$arg" in
+        --non-interactive) NON_INTERACTIVE=true ;;
+        -h|--help) sed -n '6,16p' "$0"; exit 0 ;;
+        *) error "unknown arg: $arg"; exit 2 ;;
+    esac
+done
 
 # ── 0. Preflight checks ───────────────────────────────────────────────────────
 step "0/12 — Preflight Checks"
@@ -33,33 +43,70 @@ fi
 if ! grep -q "Ubuntu 24.04" /etc/os-release 2>/dev/null; then
     warn "This script targets Ubuntu 24.04 LTS (ships python3.12 natively). Continuing anyway..."
     warn "On 22.04 the python3.12 packages below are NOT in the default repos and install will fail."
-    read -rp "Press Enter to continue or Ctrl+C to abort..."
+    if ! $NON_INTERACTIVE; then
+        read -rp "Press Enter to continue or Ctrl+C to abort..."
+    fi
 fi
 
 # ── 1. Gather configuration ───────────────────────────────────────────────────
 step "1/12 — Configuration"
 
 SERVER_IP=$(hostname -I | awk '{print $1}')
-read -rp "Server IP address [${SERVER_IP}]: " INPUT_IP
-SERVER_IP=${INPUT_IP:-$SERVER_IP}
+if ! $NON_INTERACTIVE; then
+    read -rp "Server IP address [${SERVER_IP}]: " INPUT_IP
+    SERVER_IP=${INPUT_IP:-$SERVER_IP}
+fi
 
-read -rsp "PostgreSQL password for 'parking' user [parking_secret]: " DB_PASS
-echo
-DB_PASS=${DB_PASS:-parking_secret}
+# DB password: reuse an existing non-placeholder value (re-run must not
+# rotate), otherwise prompt with NO default — parking_secret is rejected by
+# the app's production validator, so offering it as a default meant
+# "press Enter" produced a server that could never boot.
+DB_PASS=""
+if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    existing_db=$(grep -m1 '^DB_PASSWORD=' "$PROJECT_ROOT/.env" | cut -d= -f2- || true)
+    if [[ -n "$existing_db" && "$existing_db" != "parking_secret" && "$existing_db" != *"change-me"* ]]; then
+        DB_PASS="$existing_db"
+        info "Reusing DB_PASSWORD from existing .env (no rotation)"
+    fi
+fi
+if [[ -z "$DB_PASS" ]]; then
+    if $NON_INTERACTIVE; then
+        DB_PASS=$(openssl rand -hex 12)
+        info "Generated random DB password (stored in .env)"
+    else
+        read -rsp "PostgreSQL password for 'parking' (empty = generate random): " DB_PASS
+        echo
+        if [[ -z "$DB_PASS" || "$DB_PASS" == "parking_secret" ]]; then
+            DB_PASS=$(openssl rand -hex 12)
+            warn "parking_secret/empty rejected by the app in production — generated a random password"
+        fi
+    fi
+fi
+# Password lands in SQL (CREATE/ALTER) — restrict to safe characters.
+if [[ ! "$DB_PASS" =~ ^[A-Za-z0-9@#%^+=._-]+$ ]]; then
+    error "DB password may only contain [A-Za-z0-9@#%^+=._-] (got quotes/spaces/semicolons)."
+    exit 1
+fi
 
-read -rsp "JWT secret (64+ random chars recommended): " JWT_SECRET
-echo
-if [[ -z "$JWT_SECRET" ]]; then
+if $NON_INTERACTIVE; then
     JWT_SECRET=$(openssl rand -hex 32)
-    warn "Generated random JWT secret"
+else
+    read -rsp "JWT secret (empty = generate random): " JWT_SECRET
+    echo
+    if [[ -z "$JWT_SECRET" ]]; then
+        JWT_SECRET=$(openssl rand -hex 32)
+        warn "Generated random JWT secret"
+    fi
 fi
 
 # Booth bridge machine-to-machine auth. config.py refuses to start when
 # APP_ENV=production and this is unset, so always generate one.
 INTERNAL_API_KEY=$(openssl rand -hex 32)
 
-read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
-REPO_URL=${INPUT_REPO:-$REPO_URL}
+if ! $NON_INTERACTIVE; then
+    read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
+    REPO_URL=${INPUT_REPO:-$REPO_URL}
+fi
 if [[ "$REPO_URL" == *your-org* ]]; then
     error "REPO_URL is still the placeholder (your-org). Enter the real repository URL."
     exit 1
@@ -123,9 +170,16 @@ ok "User 'parking' created (groups: $(groups parking))"
 # ── 5. Configure PostgreSQL ───────────────────────────────────────────────────
 step "5/12 — Configuring PostgreSQL"
 
-sudo -u postgres psql -c "CREATE USER parking WITH PASSWORD '${DB_PASS}';" 2>/dev/null || ok "User 'parking' already exists"
-sudo -u postgres psql -c "CREATE DATABASE parking OWNER parking;" 2>/dev/null || ok "Database 'parking' already exists"
+# CREATE if absent, then ALWAYS ALTER: a re-run with a different password
+# used to leave the old one in place (CREATE silently skipped) while .env
+# got the new one — API could never connect again.
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='parking'" | grep -q 1 \
+    || sudo -u postgres psql -c "CREATE USER parking WITH PASSWORD '${DB_PASS}';"
+sudo -u postgres psql -c "ALTER USER parking WITH PASSWORD '${DB_PASS}';"
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='parking'" | grep -q 1 \
+    || sudo -u postgres psql -c "CREATE DATABASE parking OWNER parking;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE parking TO parking;"
+ok "PostgreSQL user/database ensured (password matches .env)"
 
 # Allow local connections with md5
 PG_HBA="/etc/postgresql/16/main/pg_hba.conf"
@@ -148,7 +202,15 @@ step "7/12 — Installing Application"
 if [[ -d "$PROJECT_ROOT/.git" ]]; then
     warn "Repository already exists at ${PROJECT_ROOT}. Pulling latest..."
     cd "$PROJECT_ROOT"
-    sudo -u parking git pull origin main
+    # Branch-aware: `git pull origin main` clobbered checkouts on fix/* or a
+    # tag with main. Pull the branch we're actually on, ff-only.
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    if [[ "$current_branch" == "HEAD" ]]; then
+        warn "Detached HEAD — skipping pull, installing this exact checkout."
+    else
+        sudo -u parking git pull --ff-only origin "$current_branch" \
+            || warn "git pull failed (diverged/local changes) — continuing with existing checkout."
+    fi
 else
     rm -rf "$PROJECT_ROOT"
     git clone "$REPO_URL" "$PROJECT_ROOT"
@@ -173,9 +235,10 @@ step "8/12 — Writing Environment Configuration"
 # Re-running the installer must NOT rotate secrets: a fresh JWT_SECRET logs
 # every operator out, and a fresh INTERNAL_API_KEY 401s every already-enrolled
 # booth. Preserve the existing values when an .env is present.
-if [[ -f "$PROJECT_ROOT/.env" ]]; then
-    existing_jwt=$(grep -m1 '^JWT_SECRET=' "$PROJECT_ROOT/.env" | cut -d= -f2-)
-    existing_key=$(grep -m1 '^INTERNAL_API_KEY=' "$PROJECT_ROOT/.env" | cut -d= -f2-)
+EXISTING_ENV="$PROJECT_ROOT/.env"
+if [[ -f "$EXISTING_ENV" ]]; then
+    existing_jwt=$(grep -m1 '^JWT_SECRET=' "$EXISTING_ENV" | cut -d= -f2-)
+    existing_key=$(grep -m1 '^INTERNAL_API_KEY=' "$EXISTING_ENV" | cut -d= -f2-)
     if [[ -n "$existing_jwt" || -n "$existing_key" ]]; then
         JWT_SECRET=${existing_jwt:-$JWT_SECRET}
         INTERNAL_API_KEY=${existing_key:-$INTERNAL_API_KEY}
@@ -183,9 +246,12 @@ if [[ -f "$PROJECT_ROOT/.env" ]]; then
     fi
 fi
 
-cat > "$PROJECT_ROOT/.env" <<EOF
-# Auto-generated by installer/server/setup.sh on $(date -Iseconds)
+ENV_TMP=$(mktemp)
+cat > "$ENV_TMP" <<EOF
+# Auto-generated by installer/_roles/server/setup.sh on $(date -Iseconds)
+# Keys NOT listed as managed below are carried over from the old file.
 APP_ENV=production
+SERVICE_ROLE=server
 DEBUG=false
 
 # Database
@@ -194,8 +260,6 @@ DB_PORT=5432
 DB_NAME=parking
 DB_USER=parking
 DB_PASSWORD=${DB_PASS}
-DB_POOL_SIZE=20
-DB_MAX_OVERFLOW=10
 
 # Redis
 REDIS_HOST=localhost
@@ -213,9 +277,34 @@ INTERNAL_API_KEY=${INTERNAL_API_KEY}
 CORS_ORIGINS=http://localhost:3000,http://${SERVER_IP}:3000
 EOF
 
-chown parking:parking "$PROJECT_ROOT/.env"
-chmod 600 "$PROJECT_ROOT/.env"
-ok ".env written to ${PROJECT_ROOT}"
+# Managed keys we regenerate ourselves + legacy keys to DROP (old installs
+# wrote DB_POOL_SIZE=20/10 which overrides the safe app defaults 8/4 and can
+# exceed Postgres max_connections=100 across gunicorn/ARQ processes).
+read -r -a MANAGED_KEYS <<'EOF'
+APP_ENV SERVICE_ROLE DEBUG DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD REDIS_HOST REDIS_PORT REDIS_DB JWT_SECRET JWT_ALGORITHM JWT_ACCESS_TOKEN_EXPIRE_MINUTES JWT_REFRESH_TOKEN_EXPIRE_DAYS INTERNAL_API_KEY CORS_ORIGINS DB_POOL_SIZE DB_MAX_OVERFLOW
+EOF
+
+if [[ -f "$EXISTING_ENV" ]]; then
+    preserved=0
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)= ]]; then
+            key="${BASH_REMATCH[1]}"
+            skip=false
+            for k in "${MANAGED_KEYS[@]}"; do
+                [[ "$key" == "$k" ]] && { skip=true; break; }
+            done
+            $skip && continue
+        fi
+        printf '%s\n' "$line" >> "$ENV_TMP"
+        preserved=$((preserved + 1))
+    done < "$EXISTING_ENV"
+    info "Preserved ${preserved} lines from existing .env (TELEGRAM_*, SETTLEMENT_*, tuning, ...)"
+fi
+
+mv "$ENV_TMP" "$EXISTING_ENV"
+chown parking:parking "$EXISTING_ENV"
+chmod 600 "$EXISTING_ENV"
+ok ".env written to ${PROJECT_ROOT} (DB pool uses app defaults 8+4)"
 
 # ── 9. Database migrations ──────────────────────────────────────────────────────
 step "9/12 — Running Database Migrations"
@@ -430,9 +519,22 @@ if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
     fi
 fi
 
-# ── Post-install diagnostic ───────────────────────────────────────────────────
-step "Post-install — parking-doctor"
-info "Running field diagnostic (non-fatal)..."
-sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" \
-    || warn "parking-doctor reported issues — review above. Gates/POS get configured in the wizard."
+# ── Post-install verification (HARD GATE) ────────────────────────────────────
+step "Post-install — parking-doctor (infrastructure gate)"
+info "Verifying infrastructure: services, DB, Redis, migrations, events consumer, ARQ..."
+# Run from PROJECT_ROOT: settings loads .env relative to cwd, so doctor must
+# see the file we just wrote (installer's cwd may be frontend/ at this point).
+cd "$PROJECT_ROOT"
+# --infra-only = checks that must pass BEFORE the setup wizard (gates/cameras
+# are configured there). Non-zero exit = install is NOT done: the old code
+# printed DONE with a warn, hiding exactly the silent-dead failures this
+# gate exists for. Wizard-dependent checks live in a plain re-run of
+# parking-doctor with no flags.
+if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --infra-only; then
+    ok "INSTALL VERIFIED — all infrastructure checks green. Next: open the setup link above."
+else
+    error "INSTALL FAILED VERIFICATION — see the FAIL rows above."
+    error "Fix them, then re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/parking_doctor.py --infra-only"
+    exit 1
+fi
 echo ""

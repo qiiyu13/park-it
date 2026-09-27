@@ -7,7 +7,21 @@ sudo ./setup.sh                # interactive role prompt
 sudo ./setup.sh --role server  # full backend stack
 sudo ./setup.sh --role booth   # booth PC (kiosk + booth_bridge)
 sudo ./setup.sh --role combo   # server + on-box booth (single-PC site)
+
+# Unattended (CI / scripted field rolls). Non-interactive requires a role;
+# booth configure additionally needs server IP + enrollment token:
+sudo ./setup.sh --role server --non-interactive
+sudo ./setup.sh --role booth --non-interactive \
+    --server-ip=192.168.1.100 --token=<enroll-token> \
+    --booth-code=BOOTH_02 --gate-code=GOUT-02
+sudo ./setup.sh --role combo --non-interactive --gate-code=GOUT-01
 ```
+
+Every install ends with a **hard verification gate**: `parking-doctor
+--infra-only` must pass (services, DB, Redis, API, migrations at head,
+events consumer alive, ARQ workers beating) or the installer exits
+non-zero — no more "DONE with warnings". Gate/camera checks still happen
+after the setup wizard: `sudo -u parking python scripts/parking_doctor.py`.
 
 ## Roles
 

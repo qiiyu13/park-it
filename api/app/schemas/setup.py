@@ -28,12 +28,14 @@ class EnrollRequest(BaseModel):
 
 
 class EnrollResponse(BaseModel):
-    """Secrets + connection details a booth PC needs to join the server."""
+    """Booth enrollment response — everything a booth needs, nothing it doesn't.
+
+    No Redis fields: booth_bridge is HTTP-only, and the server's Redis binds
+    loopback — handing it out produced unreachable config on every booth.
+    """
 
     api_base_url: str
     internal_api_key: str
-    redis_host: str
-    redis_port: int
 
 
 class CreateAdminRequest(BaseModel):

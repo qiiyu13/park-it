@@ -177,6 +177,119 @@ async def check_api_health(report: Report) -> None:
     report.add(c)
 
 
+async def check_migrations(report: Report) -> None:
+    """alembic current must equal heads.
+
+    A missed migration means runtime 500s the moment new code touches a
+    missing column — and nothing else in the stack reports it.
+    """
+    c = Check("Migrations at head", "Core")
+    t0 = time.time()
+    try:
+        env = {**os.environ, "PYTHONPATH": str(ROOT)}
+        cur = subprocess.run(
+            [sys.executable, "-m", "alembic", "current"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30, env=env,
+        )
+        heads = subprocess.run(
+            [sys.executable, "-m", "alembic", "heads"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30, env=env,
+        )
+        if cur.returncode != 0:
+            c.status = "FAIL"
+            c.message = f"alembic current failed: {(cur.stderr or '').strip()[:100]}"
+            c.fix = "cd /opt/parking-system-v2 && .venv/bin/alembic current"
+        else:
+            head_revs = {
+                line.split()[0]
+                for line in heads.stdout.splitlines()
+                if line.strip() and not line.startswith("#")
+            }
+            current_rev = None
+            for line in cur.stdout.splitlines():
+                line = line.strip()
+                if not line or line.startswith(("INFO", "Running")):
+                    continue
+                rev = line.split()[0]
+                if rev != "<none>":
+                    current_rev = rev  # last applied revision = bottom line
+            if current_rev is None:
+                c.status = "FAIL"
+                c.message = "database has no revision (empty schema?)"
+                c.fix = "cd /opt/parking-system-v2 && .venv/bin/alembic upgrade head"
+            elif current_rev in head_revs:
+                c.message = f"at {current_rev}"
+            else:
+                c.status = "FAIL"
+                c.message = f"at {current_rev}, head is {'/'.join(sorted(head_revs))}"
+                c.fix = "cd /opt/parking-system-v2 && .venv/bin/alembic upgrade head"
+    except Exception as e:
+        c.status = "FAIL"
+        c.message = str(e)[:120]
+        c.fix = "run alembic manually from /opt/parking-system-v2"
+    c.duration_ms = (time.time() - t0) * 1000
+    report.add(c)
+
+
+async def check_events_consumer(report: Report) -> None:
+    """Freshness of the event consumer's Redis heartbeat.
+
+    The unit being 'active' proves nothing: the Pub/Sub loop can die inside
+    a running process (one Redis blip used to do exactly that) while every
+    gate event goes unprocessed — ticket buttons silent, no transactions.
+    The consumer writes this key every 30s (TTL 90s) only while its
+    subscribe loop has been healthy recently.
+    """
+    c = Check("Event consumer alive", "Core")
+    t0 = time.time()
+    try:
+        await redis_client.connect()
+        ttl = await redis_client.client.ttl("heartbeat:event-consumer")
+        if ttl > 0:
+            c.message = f"beating (ttl={ttl}s)"
+        else:
+            c.status = "FAIL"
+            c.message = "no heartbeat — consumer dead or its subscribe loop is broken"
+            c.fix = (
+                "systemctl status parking-events && "
+                "journalctl -u parking-events -n 50"
+            )
+    except Exception as e:
+        c.status = "FAIL"
+        c.message = f"redis read failed: {e}"[:120]
+        c.fix = "Verify redis-server is up; check REDIS_HOST in .env"
+    c.duration_ms = (time.time() - t0) * 1000
+    report.add(c)
+
+
+async def check_arq_workers(report: Report) -> None:
+    """ARQ worker health-check keys (settings set health_check_interval=60).
+
+    Unit 'active' covers process existence; the key proves the worker's run
+    loop is actually executing (it is refreshed every ~60s with a 61s TTL).
+    """
+    for queue, unit in (
+        ("critical", "parking-worker-critical"),
+        ("background", "parking-worker-bg"),
+    ):
+        c = Check(f"ARQ worker {queue}", "Core")
+        t0 = time.time()
+        try:
+            await redis_client.connect()
+            ttl = await redis_client.client.ttl(f"arq:queue:{queue}:health-check")
+            if ttl > 0:
+                c.message = f"beating (ttl={ttl}s)"
+            else:
+                c.status = "FAIL"
+                c.message = "no health key — worker not running or crashed"
+                c.fix = f"systemctl status {unit} && journalctl -u {unit} -n 50"
+        except Exception as e:
+            c.status = "FAIL"
+            c.message = f"redis read failed: {e}"[:120]
+        c.duration_ms = (time.time() - t0) * 1000
+        report.add(c)
+
+
 async def load_gates(only: str | None) -> list[dict]:
     """Load gates from DB as dicts (avoid ORM dependency on full app context)."""
     from sqlalchemy import text
@@ -532,7 +645,20 @@ def check_core_units(report: Report) -> None:
 
 
 def check_booth_units(report: Report) -> None:
-    for unit in ("parking-booth-bridge", "parking-kiosk"):
+    # Units are named booth-bridge-<code>.service by the installer; the old
+    # hardcoded parking-booth-bridge/parking-kiosk names never existed, so
+    # this check failed on every healthy booth (red alarms nobody trusts).
+    units = sorted(p.name for p in Path("/etc/systemd/system").glob("booth-bridge-*.service"))
+    if Path("/etc/systemd/system/parking-kiosk.service").exists():
+        units.append("parking-kiosk")
+    if not units:
+        c = Check("booth bridge unit", "Booth services")
+        c.status = "FAIL"
+        c.message = "no booth-bridge-*.service installed"
+        c.fix = "re-run installer: sudo ./setup.sh --configure-only"
+        report.add(c)
+        return
+    for unit in units:
         c = Check(unit, "Booth services")
         active, state = systemd_active(unit)
         c.message = state
@@ -569,10 +695,20 @@ def check_booth_serials(report: Report) -> None:
 
 def check_booth_to_server(report: Report) -> None:
     """Ping the configured API server from the booth."""
-    settings = get_settings()
-    api_base = os.environ.get("API_BASE_URL") or getattr(settings, "api_base_url", None) or "http://127.0.0.1"
-    # Strip scheme + port for tcp probe
+    # Resolution order: API_BASE_URL env → /etc/parking/booth.json (what the
+    # bridge actually uses) → localhost. The old settings-attr fallback hit
+    # 127.0.0.1:80 on the booth itself and failed on every remote booth.
     import urllib.parse
+
+    api_base = os.environ.get("API_BASE_URL")
+    if not api_base:
+        try:
+            api_base = json.loads(Path("/etc/parking/booth.json").read_text()).get(
+                "api_base_url"
+            )
+        except Exception:
+            api_base = None
+    api_base = api_base or "http://127.0.0.1"
     parsed = urllib.parse.urlparse(api_base if "://" in api_base else f"http://{api_base}")
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or 80
@@ -608,13 +744,22 @@ async def run_booth() -> Report:
     return report
 
 
-async def run(only: str | None) -> Report:
+async def run(only: str | None, infra_only: bool = False) -> Report:
+    """Full server report. ``infra_only`` stops after the checks that must
+    pass BEFORE the setup wizard (services, DB, Redis, API, migrations,
+    events consumer, ARQ) — gates/cameras/printers are configured there and
+    would false-alarm on a fresh install."""
     report = Report()
     check_core_units(report)
     check_directories(report)
     await check_database(report)
     await check_redis_ping(report)
     await check_api_health(report)
+    await check_migrations(report)
+    await check_events_consumer(report)
+    await check_arq_workers(report)
+    if infra_only:
+        return report
     await check_gates(report, only)
     if only is None:
         await check_cameras(report)
@@ -707,6 +852,8 @@ def main() -> None:
     ap.add_argument("--gate", help="limit gate checks to one code (e.g. GIN01)")
     ap.add_argument("--booth", action="store_true",
                     help="run booth-PC checks only (skip DB/Redis/API local; probe network to server, local serials, booth_bridge unit)")
+    ap.add_argument("--infra-only", action="store_true",
+                    help="core infrastructure only (services, DB, Redis, API, migrations, events consumer, ARQ) — what the installer gates on")
     ap.add_argument("--fix", action="store_true",
                     help="after report, walk through FAIL/WARN and prompt to run each fix")
     ap.add_argument("--yes", action="store_true",
@@ -717,7 +864,10 @@ def main() -> None:
 
     configure_logging()
     try:
-        report = asyncio.run(run_booth() if args.booth else run(args.gate))
+        if args.booth:
+            report = asyncio.run(run_booth())
+        else:
+            report = asyncio.run(run(args.gate, infra_only=args.infra_only))
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception as e:
