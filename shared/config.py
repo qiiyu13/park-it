@@ -65,6 +65,8 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000", alias="CORS_ORIGINS"
     )
     internal_api_key: str | None = Field(default=None, alias="INTERNAL_API_KEY")
+    # Test-only escape hatch for automated UI suites. Never enable in production.
+    rate_limit_disabled: bool = Field(default=False, alias="RATE_LIMIT_DISABLED")
 
     # Settlement
     # Multibank settlement is in operational timezone (Asia/Jakarta).
@@ -157,6 +159,8 @@ class Settings(BaseSettings):
     def _validate_production_settings(self) -> "Settings":
         """Ensure critical settings are configured in production."""
         if self.app_env == "production":
+            if self.rate_limit_disabled:
+                raise ValueError("RATE_LIMIT_DISABLED is test-only and must not be enabled in production")
             if not self.internal_api_key:
                 raise ValueError(
                     "INTERNAL_API_KEY must be set in production — "

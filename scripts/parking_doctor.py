@@ -296,12 +296,15 @@ async def load_gates(only: str | None) -> list[dict]:
     from sqlalchemy.ext.asyncio import create_async_engine
     engine = create_async_engine(get_settings().database_url)
     q = text("""
-        SELECT id, code, name, direction, protocol,
-               controller_host, controller_port, controller_device, controller_baudrate,
-               gate_open_timeout_s, is_active, hardware_config
-        FROM gates
-        WHERE is_active = true
-        ORDER BY direction, code
+        SELECT g.id, g.code, g.name, g.direction, g.protocol,
+               g.controller_host, g.controller_port, g.controller_device,
+               g.controller_baudrate, g.gate_open_timeout_s, g.is_active,
+               g.hardware_config, g.pos_id,
+               p.code AS pos_code, p.last_seen_at AS pos_last_seen_at
+        FROM gates g
+        LEFT JOIN pos p ON p.id = g.pos_id
+        WHERE g.is_active = true
+        ORDER BY g.direction, g.code
     """)
     async with engine.connect() as conn:
         rows = (await conn.execute(q)).mappings().all()
@@ -574,9 +577,40 @@ async def check_gates(report: Report, only: str | None) -> None:
             reach.fix = "Re-run setup wizard hardware step"
         report.add(reach)
 
-        # systemd unit
-        unit_kind = "gate-in" if g["direction"] == "IN" else "gate-out"
-        unit = f"parking-daemon-{unit_kind}@{code}.service"
+        # Runtime liveness. IN lanes run a gate-in daemon; OUT lanes have no
+        # daemon at all — they are driven by the booth PC's booth_bridge, so
+        # checking parking-daemon-gate-out@* reported every exit gate as FAIL
+        # on healthy installs (that unit does not exist).
+        if g["direction"] == "OUT":
+            sys_c = Check(f"{code} booth", "Gates")
+            pos_code = g.get("pos_code")
+            if not pos_code:
+                sys_c.status = "FAIL"
+                sys_c.message = "no POS booth assigned to this exit gate"
+                sys_c.fix = f"assign pos_id to gate {code} via the setup wizard"
+            else:
+                sys_c.message = f"driven by booth {pos_code} (no gate-out daemon)"
+            report.add(sys_c)
+
+            hb = Check(f"{code} heartbeat", "Gates")
+            last_seen = g.get("pos_last_seen_at")
+            if last_seen is None:
+                hb.status = "FAIL"
+                hb.message = f"booth {pos_code or '?'} has never checked in"
+                hb.fix = "On the booth: sudo systemctl status booth-bridge-*; check booth.json"
+            else:
+                age_s = (datetime.now(UTC) - last_seen).total_seconds()
+                hb.message = f"booth {pos_code} seen {age_s:.0f}s ago"
+                if age_s >= 300:
+                    hb.status = "FAIL"
+                    hb.fix = f"booth {pos_code} is offline; restart booth-bridge on that PC"
+                elif age_s >= 60:
+                    hb.status = "WARN"
+                    hb.fix = "heartbeat late; check booth→server network"
+            report.add(hb)
+            continue
+
+        unit = f"parking-daemon-gate-in@{code}.service"
         sys_c = Check(f"{code} daemon", "Gates")
         active, state = systemd_active(unit)
         sys_c.message = f"{unit} → {state}"

@@ -32,10 +32,17 @@ payment_success_total = Counter(
     ["method"],
 )
 
-settlement_files_generated_total = Counter(
+# Settlement files are produced by the background worker, a different process
+# from the API that serves /metrics. Counter objects are process-local, so the
+# worker INCRs a Redis key and each scrape mirrors the absolute value into this
+# gauge. A gauge (not counter) keeps the value identical across gunicorn
+# workers instead of each replaying the delta into its own registry.
+settlement_files_generated_total = Gauge(
     "settlement_files_generated_total",
-    "Total settlement files generated",
+    "Total settlement files generated (mirrored from the worker via Redis)",
 )
+
+SETTLEMENT_METRIC_KEY = "metrics:settlement_files_generated"
 
 # Worker metrics
 print_jobs_total = Counter(
@@ -110,6 +117,24 @@ async def refresh_gate_online() -> None:
             if gid not in seen:
                 gate_online.labels(gate_id=gid).set(0)
     except Exception:
+        return
+
+
+async def refresh_settlement_files_metric() -> None:
+    """Replay the worker's Redis settlement counter into this process.
+
+    ``increase(settlement_files_generated_total[26h])`` in the alert rules
+    previously evaluated a permanently-zero series (the counter was never
+    incremented anywhere), firing NoSettlementGenerated constantly.
+    """
+    try:
+        from shared.redis import redis_client
+
+        await redis_client.connect()
+        raw = await redis_client.get(SETTLEMENT_METRIC_KEY)
+        settlement_files_generated_total.set(int(raw or 0))
+    except Exception:
+        # Metrics scrape must never crash the endpoint.
         return
 
 

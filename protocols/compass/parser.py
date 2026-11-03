@@ -56,6 +56,16 @@ def parse_stat(response: bytes) -> dict:
         result["out2"] = bits[5] == "1"
         result["out3"] = bits[6] == "1"
         result["out4"] = bits[7] == "1"
+    else:
+        # Short STAT form: STATxy where x=IN1, y=IN2 (LEFT-PADDED).
+        # Legacy controller usage: STAT10 -> IN1 active, STAT1 -> "01" ->
+        # IN2 active, STAT11 -> both. Confirmed against the legacy entry
+        # prototype (IN1=ticket button, IN2=vehicle sensor).
+        short_match = re.search(r"STAT([01]{1,2})(?![01])", text)
+        if short_match:
+            bits = short_match.group(1).zfill(2)
+            result["in1"] = bits[0] == "1"
+            result["in2"] = bits[1] == "1"
 
     # Format 2: RSS push events — IN1ON / IN1OFF / IN2ON / etc.
     # These override the STAT binary bits for the specific input.

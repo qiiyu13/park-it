@@ -61,8 +61,14 @@ async def create_tokens(user: User) -> dict[str, str]:
     }
 
 
-async def refresh_tokens(refresh_token: str) -> dict[str, str] | None:
-    """Rotate refresh token and return new token pair."""
+async def refresh_tokens(
+    refresh_token: str, db: AsyncSession
+) -> dict[str, str] | None:
+    """Rotate refresh token and return new token pair.
+
+    The user is re-read from the database so a demoted or deactivated account
+    cannot keep its old role/access for the full refresh-token lifetime (7d).
+    """
     try:
         payload = decode_token(refresh_token)
     except Exception:
@@ -78,14 +84,25 @@ async def refresh_tokens(refresh_token: str) -> dict[str, str] | None:
         logger.warning("refresh_failed_revoked_token")
         return None
 
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError, TypeError):
+        logger.warning("refresh_failed_invalid_subject")
+        return None
+
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active:
+        logger.warning("refresh_failed_user_inactive", user_id=user_id)
+        return None
+
     # Revoke old refresh token
     if jti:
         await _revoke_token(jti, payload.get("exp", 0))
 
     token_data = {
-        "sub": payload["sub"],
-        "username": payload.get("username", ""),
-        "role": payload.get("role", "operator"),
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
     }
     new_access = create_access_token(token_data)
     new_refresh = create_refresh_token(token_data)

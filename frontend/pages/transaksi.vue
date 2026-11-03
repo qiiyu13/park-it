@@ -10,17 +10,17 @@
         <input
           v-model="dateFrom"
           type="date"
-          class="border-2 border-foreground bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
         >
         <span class="font-bold text-foreground">s/d</span>
         <input
           v-model="dateTo"
           type="date"
-          class="border-2 border-foreground bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
         >
         <select
           v-model="statusFilter"
-          class="border-2 border-foreground bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
         >
           <option value="">Semua Status</option>
           <option value="ACTIVE">Aktif</option>

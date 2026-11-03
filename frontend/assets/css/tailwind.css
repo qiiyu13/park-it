@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 /*
- * E-Parking v2 — Neo-Brutalist Theme
- * Bold borders, hard shadows, zero border-radius.
- * Light default. Dark mode via .dark class on <html>.
+ * E-Parking v2 — Industrial control-room theme.
+ *
+ * Calm neutral surfaces, ink chrome, one safety-amber accent. 1px edges,
+ * soft depth, sentence-case hierarchy. No hard offsets or hand-drawn shapes.
  */
 
 @theme {
@@ -27,55 +28,77 @@
   --color-rfid: var(--color-accent-blue);
   --color-emoney: var(--color-accent-purple);
 
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
+  --color-sidebar: var(--sidebar-bg);
+  --color-sidebar-foreground: var(--sidebar-fg);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-focus: var(--focus-ring);
 
-  --shadow-brutal-sm: 2px 2px 0px var(--shadow-color);
-  --shadow-brutal: 4px 4px 0px var(--shadow-color);
-  --shadow-brutal-lg: 8px 8px 0px var(--shadow-color);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  --shadow-brutal-sm: 0 1px 2px var(--shadow-color);
+  --shadow-brutal: 0 2px 8px var(--shadow-color);
+  --shadow-brutal-lg: 0 16px 40px var(--shadow-color);
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 }
 
 :root,
 .light {
-  --bg-background: #FFFFFF;
-  --bg-foreground: #1A1A1A;
-  --bg-surface: #F5F5F0;
-  --bg-surface-hover: #EBEBE6;
-  --bg-muted: #E5E5E0;
-  --text-muted-fg: #6B7280;
-  --border-default: #1A1A1A;
-  --shadow-color: #1A1A1A;
+  /* Warm neutral canvas, ink text. Neutrals carry the surface; amber is action. */
+  --bg-background: oklch(0.972 0.006 90);
+  --bg-foreground: oklch(0.225 0.02 255);
+  --bg-surface: oklch(0.995 0.002 90);
+  --bg-surface-hover: oklch(0.952 0.007 90);
+  --bg-muted: oklch(0.928 0.009 90);
+  --text-muted-fg: oklch(0.500 0.016 255);
+  --border-default: oklch(0.868 0.011 255);
 
-  --color-accent-primary: #FFD700;
-  --fg-on-primary: #1A1A1A;
-  --color-accent-pink: #FF6B9D;
-  --color-accent-blue: #3B82F6;
-  --color-accent-green: #22C55E;
-  --color-accent-amber: #F59E0B;
-  --color-accent-red: #EF4444;
-  --color-accent-purple: #A855F7;
+  --sidebar-bg: oklch(0.225 0.025 255);
+  --sidebar-fg: oklch(0.965 0.005 90);
+  --sidebar-muted: oklch(0.745 0.012 255);
+  --focus-ring: oklch(0.72 0.15 82);
+
+  --shadow-color: oklch(0.20 0.02 255 / 0.12);
+
+  --color-accent-primary: oklch(0.825 0.145 84); /* safety amber */
+  --fg-on-primary: oklch(0.225 0.02 255);
+  --color-accent-pink: oklch(0.62 0.16 350);
+  --color-accent-blue: oklch(0.53 0.16 255);
+  --color-accent-green: oklch(0.52 0.13 152);
+  --color-accent-amber: oklch(0.52 0.14 70);
+  --color-accent-red: oklch(0.50 0.18 25);
+  --color-accent-purple: oklch(0.55 0.15 300);
 }
 
 .dark {
-  --bg-background: #1A1A1A;
-  --bg-foreground: #F5F5F0;
-  --bg-surface: #2A2A2A;
-  --bg-surface-hover: #3A3A3A;
-  --bg-muted: #333333;
-  --text-muted-fg: #9CA3AF;
-  --border-default: #F5F5F0;
-  --shadow-color: #F5F5F0;
+  /* Authored dark theme: surface lightness carries depth, not heavy shadow. */
+  --bg-background: oklch(0.180 0.014 255);
+  --bg-foreground: oklch(0.955 0.005 90);
+  --bg-surface: oklch(0.225 0.015 255);
+  --bg-surface-hover: oklch(0.275 0.016 255);
+  --bg-muted: oklch(0.305 0.016 255);
+  --text-muted-fg: oklch(0.720 0.014 255);
+  --border-default: oklch(0.365 0.018 255);
 
-  --color-accent-primary: #FFD700;
-  --fg-on-primary: #1A1A1A;
-  --color-accent-pink: #FF6B9D;
-  --color-accent-blue: #60A5FA;
-  --color-accent-green: #4ADE80;
-  --color-accent-amber: #FBBF24;
-  --color-accent-red: #F87171;
-  --color-accent-purple: #C084FC;
+  --sidebar-bg: oklch(0.145 0.014 255);
+  --sidebar-fg: oklch(0.965 0.005 90);
+  --sidebar-muted: oklch(0.720 0.014 255);
+  --focus-ring: oklch(0.78 0.14 84);
+
+  --shadow-color: oklch(0 0 0 / 0.45);
+
+  --color-accent-primary: oklch(0.805 0.145 84);
+  --fg-on-primary: oklch(0.200 0.02 255);
+  --color-accent-pink: oklch(0.70 0.14 350);
+  --color-accent-blue: oklch(0.68 0.13 255);
+  --color-accent-green: oklch(0.68 0.12 152);
+  --color-accent-amber: oklch(0.74 0.13 70);
+  --color-accent-red: oklch(0.65 0.16 25);
+  --color-accent-purple: oklch(0.68 0.13 300);
 }
 
 @layer base {
@@ -92,33 +115,238 @@
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv11' 1, 'ss01' 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: var(--color-accent-primary);
+    color: var(--fg-on-primary);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer base {
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: var(--bg-surface);
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--bg-foreground);
-    border: 2px solid var(--bg-surface);
+    background: var(--border-default);
+    border: 3px solid var(--bg-background);
+    border-radius: 999px;
   }
 }
 
 @layer utilities {
   .shadow-brutal-sm {
-    box-shadow: 2px 2px 0px var(--shadow-color);
+    box-shadow: var(--shadow-brutal-sm);
   }
   .shadow-brutal {
-    box-shadow: 4px 4px 0px var(--shadow-color);
+    box-shadow: var(--shadow-brutal);
   }
   .shadow-brutal-lg {
-    box-shadow: 8px 8px 0px var(--shadow-color);
+    box-shadow: var(--shadow-brutal-lg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * POS worker dialogs — same industrial language as the rest of the product.
+ * ------------------------------------------------------------------------- */
+@layer components {
+  .pos-modal-backdrop {
+    background: oklch(0.14 0.015 255 / 0.55);
+    backdrop-filter: blur(3px);
+  }
+
+  .pos-modal {
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-brutal-lg);
+  }
+
+  .pos-divider {
+    border-top: 1px solid var(--border-default);
+  }
+
+  .pos-display {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  .pos-body {
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+
+  .pos-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted-fg);
+  }
+
+  .pos-choice {
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .pos-choice:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--bg-foreground);
+  }
+
+  .pos-choice.is-active {
+    background: color-mix(in oklch, var(--color-accent-primary) 20%, var(--bg-surface));
+    border-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-accent-primary) 35%, transparent);
+  }
+
+  .pos-pin {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3.5rem;
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .pos-pin.is-filled {
+    background: var(--bg-foreground);
+    color: var(--bg-surface);
+    border-color: var(--bg-foreground);
+  }
+
+  .pos-pin.is-current {
+    border-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent-primary) 30%, transparent);
+  }
+
+  .pos-input {
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    outline: none;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .pos-input:focus {
+    border-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent-primary) 25%, transparent);
+  }
+
+  .pos-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.75rem;
+    padding: 0.6rem 1.1rem;
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+
+  .pos-btn:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    border-color: var(--bg-foreground);
+  }
+
+  .pos-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .pos-btn.is-go {
+    background: var(--color-accent-green);
+    border-color: var(--color-accent-green);
+    color: #fff;
+  }
+
+  .pos-btn.is-primary {
+    background: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+    color: var(--fg-on-primary);
+  }
+
+  .pos-btn.is-danger {
+    background: var(--color-accent-red);
+    border-color: var(--color-accent-red);
+    color: #fff;
+  }
+
+  .pos-key {
+    display: inline-block;
+    padding: 0.05rem 0.32rem;
+    background: var(--bg-muted);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    line-height: 1.35;
+  }
+
+  .pos-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .pos-step.is-active {
+    background: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+    color: var(--fg-on-primary);
+  }
+
+  .pos-step.is-done {
+    background: var(--color-accent-green);
+    border-color: var(--color-accent-green);
+    color: #fff;
   }
 }

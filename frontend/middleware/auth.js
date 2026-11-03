@@ -27,6 +27,12 @@ function isAdminOnly(path) {
 }
 
 export default defineNuxtRouteMiddleware(async (to) => {
+  // The setup wizard is gated by its own one-time token/session, not a JWT.
+  // Without this exemption a fresh install deadlocks: /setup redirects to
+  // /login (no admin exists yet), and the global setup middleware sends
+  // /login back to /setup while setup is incomplete.
+  if (to.path === '/setup' || to.path.startsWith('/setup/')) return
+
   const authStore = useAuthStore()
 
   const publicRoutes = ['/login']

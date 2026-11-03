@@ -59,9 +59,15 @@ def create_app() -> FastAPI:
     # Metrics endpoint
     @app.get("/metrics")
     async def metrics() -> Response:
-        from api.app.middleware.metrics import refresh_gate_online, refresh_queue_depths
+        from api.app.middleware.metrics import (
+            refresh_gate_online,
+            refresh_queue_depths,
+            refresh_settlement_files_metric,
+        )
+
         await refresh_queue_depths()
         await refresh_gate_online()
+        await refresh_settlement_files_metric()
         return get_metrics_response()
 
     # Rate limiting

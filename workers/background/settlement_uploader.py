@@ -112,15 +112,6 @@ def parse_nok_response(content: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _have_asyncssh() -> bool:
-    try:
-        import asyncssh  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 @asynccontextmanager
 async def _sftp_session(
     host: str,
@@ -167,10 +158,6 @@ async def upload_settlement_file(
     if not Path(file_path).is_file():
         logger.error("settlement_upload_no_file", file_path=file_path)
         return False
-
-    if not _have_asyncssh():
-        logger.error("settlement_upload_asyncssh_missing")
-        raise RuntimeError("asyncssh is required for SFTP upload")
 
     remote_name = os.path.basename(file_path)
     remote_dir = remote_dir.rstrip("/") or "/"

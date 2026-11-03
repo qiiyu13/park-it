@@ -4,9 +4,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.main import app
+from api.app.models.gate import Gate
 from api.app.models.pos import Pos
 from api.database import get_db
 from shared.config import get_settings
@@ -40,6 +42,54 @@ async def sample_pos(db_session: AsyncSession) -> Pos:
     return pos
 
 
+class TestBoothRegistration:
+    async def test_requires_api_key(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/pos/register",
+            json={"booth_code": "BOOTH_X", "name": "Booth X"},
+        )
+        assert resp.status_code == 403
+
+    async def test_registers_booth_and_links_gate(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        gate = Gate(
+            name="Exit 1",
+            code="GOUT-TEST",
+            direction="OUT",
+            is_active=True,
+        )
+        db_session.add(gate)
+        await db_session.commit()
+        await db_session.refresh(gate)
+
+        payload = {
+            "booth_code": "BOOTH_X",
+            "name": "Booth X",
+            "ip_address": "10.0.0.55",
+            "default_gate_code": "GOUT-TEST",
+        }
+        first = await client.post(
+            "/api/pos/register", json=payload, headers={"X-API-Key": _API_KEY}
+        )
+        assert first.status_code == 201, first.text
+        assert first.json()["code"] == "BOOTH_X"
+        assert first.json()["default_gate_id"] == gate.id
+
+        payload["name"] = "Booth X renamed"
+        second = await client.post(
+            "/api/pos/register", json=payload, headers={"X-API-Key": _API_KEY}
+        )
+        assert second.status_code == 201
+        assert second.json()["id"] == first.json()["id"]
+        assert second.json()["name"] == "Booth X renamed"
+
+        count = await db_session.scalar(
+            select(func.count()).select_from(Pos).where(Pos.code == "BOOTH_X")
+        )
+        assert count == 1
+
+
 class TestBoothHeartbeat:
     async def test_rejects_missing_api_key(self, client: AsyncClient):
         resp = await client.post(
@@ -53,8 +103,8 @@ class TestBoothHeartbeat:
             json={"booth_code": "GHOST_BOOTH"},
             headers={"X-API-Key": _API_KEY},
         )
-        # Server must NOT auto-create the booth — registration belongs to
-        # the setup wizard, not the runtime heartbeat path.
+        # Server must NOT auto-create the booth from a heartbeat. An enrolled
+        # booth registers explicitly via POST /api/pos/register.
         assert resp.status_code == 404
 
     async def test_records_last_seen_at_and_status(

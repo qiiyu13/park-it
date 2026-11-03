@@ -10,6 +10,7 @@ States: IDLE → WAITING_INPUT → method branch → OPENING → IDLE
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from daemons.base import BaseDaemon
@@ -45,7 +46,6 @@ STATE_WAITING_INPUT = "WAITING_INPUT"
 STATE_VALIDATING = "VALIDATING"
 STATE_PROCESSING = "PROCESSING"
 STATE_OPENING = "OPENING"
-STATE_ERROR = "ERROR"
 
 
 class GateInDaemon(BaseDaemon):
@@ -479,11 +479,6 @@ class GateInDaemon(BaseDaemon):
                 )
             elif command_type == "reset_gate":
                 await self._cmd_reset_gate(command_data.get("reason", "operator"))
-            elif command_type == "inject_rss":
-                signal = command_data.get("signal", "")
-                logger.warning("mock_inject_rss", gate_id=self.gate_id, signal=signal)
-                frame = b"\xa6" + signal.encode("latin-1") + b"\xa9"
-                await self._dispatch_rss_message(frame)
             elif command_type == "deduct":
                 logger.warning("deduct_ignored_at_gate_in", gate_id=self.gate_id)
             else:
@@ -509,7 +504,13 @@ class GateInDaemon(BaseDaemon):
 
     async def _cmd_play_audio(self, track: int) -> None:
         track_map = self.hw.get("audio", {}).get("track_map", {})
-        actual = track_map.get(str(track), track)
+        try:
+            actual = int(track_map.get(str(track), track))
+        except (TypeError, ValueError):
+            # hardware_config is admin-editable JSON; a bad value must not
+            # crash the state machine with a format-string TypeError.
+            logger.warning("audio_track_map_invalid", gate_id=self.gate_id, track=track)
+            actual = track
         if self.config.get("protocol", "compass") == "serial":
             await self.publish_event(PlayAudioEvent(gate_id=self.gate_id, track=actual))
         else:
@@ -608,7 +609,11 @@ class GateInDaemon(BaseDaemon):
     # ------------------------------------------------------------------
 
     async def _rfid_serial_reader_task(self) -> None:
-        """Read card numbers from a directly-connected serial RFID reader."""
+        """Read card numbers from a directly-connected serial RFID reader.
+
+        The device may be absent at boot (USB not enumerated yet) or disappear
+        mid-run; retry with capped backoff instead of giving up permanently.
+        """
         rfid_cfg = self.hw.get("rfid", {})
         device = rfid_cfg.get("device")
         baudrate = rfid_cfg.get("baudrate", 9600)
@@ -617,28 +622,37 @@ class GateInDaemon(BaseDaemon):
             return
 
         loop = asyncio.get_event_loop()
-        try:
-            import serial as _serial
-            ser = _serial.Serial(port=device, baudrate=baudrate, timeout=0.5)
-        except Exception as e:
-            logger.error("rfid_serial_open_failed", gate_id=self.gate_id, error=str(e))
-            return
-
-        logger.info("rfid_serial_reader_started", gate_id=self.gate_id, device=device)
-        try:
-            while self._running:
-                try:
+        delay = 1.0
+        while self._running:
+            ser = None
+            try:
+                import serial as _serial
+                ser = _serial.Serial(port=device, baudrate=baudrate, timeout=0.5)
+                delay = 1.0
+                logger.info("rfid_serial_reader_started", gate_id=self.gate_id, device=device)
+                while self._running:
                     raw = await loop.run_in_executor(None, ser.readline)
                     card_number = raw.decode("ascii", errors="ignore").strip()
                     if card_number and self.state == STATE_WAITING_INPUT and self.has_rfid:
                         await self._on_rfid_card_read(card_number, "S")
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error("rfid_serial_read_error", gate_id=self.gate_id, error=str(e))
-                    await asyncio.sleep(1)
-        finally:
-            ser.close()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(
+                    "rfid_serial_reader_error",
+                    gate_id=self.gate_id,
+                    error=str(e),
+                    next_retry_s=delay,
+                )
+                if ser is not None:
+                    with contextlib.suppress(Exception):
+                        ser.close()
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+            finally:
+                if ser is not None:
+                    with contextlib.suppress(Exception):
+                        ser.close()
 
     async def _send_controller_command(self, command: bytes) -> bool:
         """Send a framed command to the controller.

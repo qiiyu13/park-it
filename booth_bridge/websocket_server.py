@@ -30,6 +30,7 @@ class WebSocketServer:
         gate_opener=None,
         max_clients: int = 8,
         outbox=None,
+        emoney_init_key: bytes | None = None,
     ) -> None:
         self.serial_manager = serial_manager
         self.port = port
@@ -40,6 +41,13 @@ class WebSocketServer:
         self._server = None
         self._clients: set = set()
         self._bg_tasks: set = set()
+        # PASSTI INIT is required once per reader power-on. The key is
+        # site-specific, so it is optional: without it we keep the legacy
+        # behaviour (reader already initialised by another tool).
+        self.emoney_init_key = emoney_init_key
+        self._emoney_initialized = False
+        self.reader_mid: str | None = None
+        self.reader_tid: str | None = None
 
     def _spawn(self, coro, name: str) -> None:
         """Fire a background task with a strong ref + exception logging.
@@ -81,6 +89,89 @@ class WebSocketServer:
             self._server.close()
             await self._server.wait_closed()
         logger.info("ws_server_stopped")
+
+    async def _ensure_emoney_initialized(self) -> bool:
+        """Send PASSTI INIT once per reader power-on.
+
+        Without INIT a cold reader rejects every transaction with
+        ``01 10 03``. Failure is non-fatal: a reader initialised by another
+        tool still works, and we retry on the next operation.
+        """
+        if self._emoney_initialized:
+            return True
+        if not self.emoney_init_key:
+            return False
+
+        from protocols.passti.commands import cmd_init
+        from protocols.passti.frame import is_complete_frame, parse_response, trim_to_frame
+
+        try:
+            raw = await asyncio.to_thread(
+                self.serial_manager.send,
+                "emoney_reader",
+                cmd_init(self.emoney_init_key),
+                response_timeout_s=5.0,
+                is_complete=is_complete_frame,
+            )
+            parsed = parse_response(trim_to_frame(raw))
+            body = parsed.get("body", b"")
+            if parsed.get("ok") and len(body) >= 12:
+                self.reader_mid = body[:8].hex().upper()
+                self.reader_tid = body[8:12].hex().upper()
+                self._emoney_initialized = True
+                logger.info(
+                    "emoney_reader_initialized",
+                    mid=self.reader_mid,
+                    tid=self.reader_tid,
+                )
+                return True
+            logger.warning(
+                "emoney_reader_init_failed",
+                status=parsed.get("status"),
+                error=parsed.get("error"),
+            )
+        except Exception as e:
+            logger.warning("emoney_reader_init_error", error=str(e))
+        return False
+
+    async def _recover_last_transaction(self):
+        """Ask the reader whether the interrupted deduct actually completed.
+
+        PASSTI §III.E: after a lost contact, ``Get Last Transaction`` returns
+        the deduct body if the previous operation succeeded, or an empty body
+        if it failed. This is the only safe way to resolve the charge without
+        debiting the card twice.
+        """
+        from protocols.passti.commands import (
+            cmd_get_last_transaction,
+            parse_deduct_response,
+        )
+        from protocols.passti.frame import is_complete_frame, parse_response, trim_to_frame
+
+        try:
+            raw = await asyncio.to_thread(
+                self.serial_manager.send,
+                "emoney_reader",
+                cmd_get_last_transaction(),
+                response_timeout_s=5.0,
+                is_complete=is_complete_frame,
+            )
+            parsed = parse_response(trim_to_frame(raw))
+            data = parse_deduct_response(parsed.get("body", b""))
+            if parsed.get("ok") and data.get("ok"):
+                logger.info(
+                    "emoney_recovery_succeeded",
+                    card_type=data.get("card_type"),
+                    amount=data.get("deducted"),
+                )
+                return data, parsed
+            logger.warning(
+                "emoney_recovery_no_transaction",
+                status=parsed.get("status"),
+            )
+        except Exception as e:
+            logger.warning("emoney_recovery_error", error=str(e))
+        return None, None
 
     async def _call_api_booth_result(self, payload: dict) -> None:
         """Deliver the deduct result to the API durably.
@@ -296,6 +387,7 @@ class WebSocketServer:
             from protocols.passti.commands import cmd_check_balance
             from protocols.passti.frame import is_complete_frame, trim_to_frame
 
+            await self._ensure_emoney_initialized()
             frame = cmd_check_balance(timeout_sec=10)
             response = await asyncio.to_thread(
                 self.serial_manager.send,
@@ -305,6 +397,9 @@ class WebSocketServer:
                 is_complete=is_complete_frame,
             )
             response = trim_to_frame(response)
+            if not response:
+                # Reader may have been power-cycled; force INIT next time.
+                self._emoney_initialized = False
             return {"status": True, "data": response.hex()}
 
         elif action == "emoney_deduct":
@@ -316,6 +411,7 @@ class WebSocketServer:
             from protocols.passti.commands import cmd_deduct, parse_deduct_response
             from protocols.passti.frame import is_complete_frame, parse_response, trim_to_frame
 
+            await self._ensure_emoney_initialized()
             frame = cmd_deduct(amount, timeout_sec=30)
             # The reader stays silent for the whole card-tap window (≤30s)
             # before answering, and the answer can split across USB reads —
@@ -328,6 +424,8 @@ class WebSocketServer:
                 is_complete=is_complete_frame,
             )
             raw_response = trim_to_frame(raw_response)
+            if not raw_response:
+                self._emoney_initialized = False
 
             parsed = parse_response(raw_response)
             if "error" in parsed:
@@ -349,16 +447,49 @@ class WebSocketServer:
                 deduct_status = "WRONG_CARD"
             elif status == (0x01, 0x10, 0x02):
                 deduct_status = "TIMEOUT"
+            elif status == (0x01, 0x10, 0x03):
+                deduct_status = "FAILED"
+                # Wrong/absent INIT key: force a fresh handshake next time.
+                self._emoney_initialized = False
             else:
                 deduct_status = "FAILED"
 
-            deduct_data = parse_deduct_response(parsed["body"])
-            if not deduct_data.get("ok"):
-                return {
-                    "action": "emoney_deduct_result",
-                    "status": "FAILED",
-                    "error": deduct_data.get("error", "Deduct parse failed"),
-                    "raw_response_hex": parsed.get("raw", raw_response.hex()),
+            recovered = False
+            deduct_data: dict = {}
+            if deduct_status == "SUCCESS":
+                deduct_data = parse_deduct_response(parsed["body"])
+                if not deduct_data.get("ok"):
+                    return {
+                        "action": "emoney_deduct_result",
+                        "status": "FAILED",
+                        "error": deduct_data.get("error", "Deduct parse failed"),
+                        "raw_response_hex": parsed.get("raw", raw_response.hex()),
+                    }
+            elif deduct_status == "LOST_CONTACT":
+                # The card was removed mid-deduct. Ask the reader whether the
+                # debit actually landed before asking the operator to re-tap.
+                recovered_data, recovered_parsed = await self._recover_last_transaction()
+                if recovered_data is not None:
+                    deduct_data = recovered_data
+                    if recovered_parsed is not None:
+                        parsed = recovered_parsed
+                    deduct_status = "SUCCESS"
+                    recovered = True
+
+            if not deduct_data:
+                # Error statuses carry at most card type/card number, and some
+                # carry nothing. Do not downgrade LOST_CONTACT/etc to FAILED
+                # just because there is no successful-deduct body to parse.
+                body = parsed.get("body", b"")
+                deduct_data = {
+                    "card_number": body[1:9].hex().upper() if len(body) >= 9 else "",
+                    "card_type_code": body[0] if body else None,
+                    "card_type": None,
+                    "deducted": 0,
+                    "remaining": 0,
+                    "trans_counter": 0,
+                    "mid": self.reader_mid,
+                    "tid": self.reader_tid,
                 }
 
             # QR responses carry no card number (they use trx_id) — fall back
@@ -373,6 +504,7 @@ class WebSocketServer:
             result_payload = {
                 "action": "emoney_deduct_result",
                 "status": deduct_status,
+                "recovered": recovered,
                 "card_number": card_id,
                 "deduct_amount": deduct_data.get("deducted", 0),
                 "balance_before": deduct_data.get("remaining", 0) + deduct_data.get("deducted", 0),
@@ -421,6 +553,41 @@ class WebSocketServer:
             )
 
             return result_payload
+
+        elif action == "emoney_cancel_correction":
+            # PASSTI §III.D: abandon a pending lost-contact correction so a
+            # different card can be charged. Only valid while the reader has
+            # a correction outstanding; otherwise the body is empty.
+            from protocols.passti.commands import cmd_cancel_correction
+            from protocols.passti.frame import is_complete_frame, parse_response, trim_to_frame
+
+            raw = await asyncio.to_thread(
+                self.serial_manager.send,
+                "emoney_reader",
+                cmd_cancel_correction(),
+                response_timeout_s=5.0,
+                is_complete=is_complete_frame,
+            )
+            parsed = parse_response(trim_to_frame(raw))
+            body = parsed.get("body", b"")
+            return {
+                "action": "emoney_cancel_correction",
+                "status": "SUCCESS" if parsed.get("ok") else "FAILED",
+                "card_number": body[1:9].hex().upper() if len(body) >= 9 else "",
+                "raw_response_hex": parsed.get("raw", raw.hex()),
+            }
+
+        elif action == "emoney_last_transaction":
+            # Diagnostics / manual recovery oracle.
+            data, parsed = await self._recover_last_transaction()
+            return {
+                "action": "emoney_last_transaction",
+                "status": "SUCCESS" if data else "NO_TRANSACTION",
+                "deduct_amount": data.get("deducted", 0) if data else 0,
+                "card_number": data.get("card_number", "") if data else "",
+                "transaction_counter": data.get("trans_counter", 0) if data else 0,
+                "raw_response_hex": (parsed or {}).get("raw", ""),
+            }
 
         elif action == "print_receipt":
             # Receipt printers (ESC/POS) don't ACK — use write_only so we

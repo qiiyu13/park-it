@@ -20,7 +20,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 mkdir -p "$(dirname "$TOKEN_PATH")"
-TOKEN=$(openssl rand -hex 32)
+# 12 hex chars (48 bits), uppercase, rate-limited at /api/setup/enroll.
+TOKEN=$(openssl rand -hex 6 | tr 'a-f' 'A-F')
 echo -n "$TOKEN" > "$TOKEN_PATH"
 chown root:parking "$TOKEN_PATH" 2>/dev/null || true
 chmod 0640 "$TOKEN_PATH"

@@ -16,6 +16,30 @@
       </div>
     </template>
 
+    <!-- Blocking registration error: never guess which lane this PC owns. -->
+    <div
+      v-if="posRegistrationError"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-background/95 p-6"
+    >
+      <div class="w-full max-w-lg border border-border bg-surface p-6 shadow-brutal-lg">
+        <div class="text-xs font-bold  tracking-widest text-destructive">
+          POS Tidak Terdaftar
+        </div>
+        <h1 class="mt-2 text-2xl font-bold ">
+          Komputer ini belum terhubung ke booth
+        </h1>
+        <p class="mt-3 text-sm text-muted-foreground">
+          {{ posRegistrationError }}
+        </p>
+        <div class="mt-5 flex gap-3">
+          <Button variant="outline" @click="navigateTo('/')">
+            Kembali ke Dashboard
+          </Button>
+          <Button @click="() => window.location.reload()">Coba Lagi</Button>
+        </div>
+      </div>
+    </div>
+
     <!-- Main: State-driven single-column layout -->
     <div :class="['h-full overflow-hidden', timeoutBorderClass]">
       <!-- GATE_OPEN: awaiting gate open after payment -->
@@ -129,11 +153,12 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { Button } from '~/components/ui/button'
 import { useKeyboard } from '~/composables/useKeyboard'
 import { useFormatters } from '~/composables/useFormatters'
 
 definePageMeta({
-  // middleware: 'auth',
+  middleware: 'auth',
   layout: false,
 })
 
@@ -147,6 +172,12 @@ const { fetchApi } = useApi()
 const sound = useSound()
 const { hardwareStatus, updateFromGate, updateWebSocketStatus, updateBoothHardware, resetBoothHardware, startPolling, stopPolling } = useHardwareStatus()
 const { detectCardType, maskCardNumber } = useFormatters()
+
+// Selected exit lane — declared before any watched computed so the initial
+// watch evaluation does not hit a temporal-dead-zone ReferenceError.
+const selectedGate = computed(() =>
+  websiteStore.activeGateOuts.find((g) => g.id === gateStore.selectedGateOutId)
+)
 
 // Worker session state
 const showHandoverDialog = ref(false)
@@ -193,6 +224,7 @@ const showRfidDialog = ref(false)
 const emoneyBalance = ref(null)
 const isPaymentProcessing = ref(false)
 const lastEntry = ref(null)
+const posRegistrationError = ref('')
 
 // View state (priority: GATE_OPEN > ERROR > UNIFIED)
 // UNIFIED view is always shown unless we're in a special state
@@ -219,10 +251,6 @@ const timeoutBorderClass = computed(() => {
 })
 
 // Computed
-const selectedGate = computed(() =>
-  websiteStore.activeGateOuts.find((g) => g.id === gateStore.selectedGateOutId)
-)
-
 const gateStatuses = computed(() => {
   const statuses = []
   if (selectedGate.value) {
@@ -791,14 +819,29 @@ onMounted(async () => {
     }
   } catch (err) {
     console.warn('Booth auto-detection failed:', err.message)
+    if (err.status === 404 && websiteStore.activeGateOuts.length !== 1) {
+      // With zero or multiple exit lanes, guessing would let the operator
+      // charge/open the wrong barrier. Block until the booth is registered.
+      posRegistrationError.value = websiteStore.activeGateOuts.length === 0
+        ? 'Belum ada gate keluar aktif. Aktifkan gate di Device → Gates.'
+        : 'Daftarkan booth ini di Device → POS (kode booth dan IP komputer), lalu muat ulang halaman.'
+      return
+    }
   }
 
-  // Fallback to first available gate
-  if (!gateDetected && websiteStore.activeGateOuts.length > 0) {
+  if (!gateDetected && websiteStore.activeGateOuts.length !== 1) {
+    posRegistrationError.value = websiteStore.activeGateOuts.length === 0
+      ? 'Belum ada gate keluar aktif. Aktifkan gate di Device → Gates.'
+      : 'Booth terdeteksi, tetapi gate default-nya tidak aktif. Periksa Device → POS / Gates.'
+    return
+  }
+
+  // Single-lane fallback only: unambiguous and safe.
+  if (!gateDetected && websiteStore.activeGateOuts.length === 1) {
     const fallbackGate = websiteStore.activeGateOuts[0]
     gateStore.setSelectedGateOutId(fallbackGate.id)
     onGateChange(fallbackGate.id)
-    toast.warning(`Auto-deteksi gagal, menggunakan ${fallbackGate.name}`)
+    toast.warning(`POS belum terdaftar, memakai satu-satunya gate: ${fallbackGate.name}`)
   }
 
   connectBooth()

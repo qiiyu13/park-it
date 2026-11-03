@@ -10,8 +10,11 @@ set -euo pipefail
 #   Clones the repo, builds the frontend, installs systemd services.
 #
 # Usage:
-#   sudo ./setup.sh                      # interactive
-#   sudo ./setup.sh --non-interactive    # all defaults/generates (CI, unattended)
+#   sudo ./setup.sh                      # interactive (advanced: wizard follows)
+#   sudo ./setup.sh --quick              # technician one-command install
+#   sudo ./setup.sh --quick --topology 2in2out --tariff mall \
+#        --site-name "Parkir ABC" --admin-user admin
+#   sudo ./setup.sh --non-interactive    # infrastructure only (CI); wizard follows
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -24,13 +27,68 @@ REPO_URL="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || echo "http
 source "$SCRIPT_DIR/../common.sh"
 
 NON_INTERACTIVE=false
+QUICK=false
+QUICK_TOPOLOGY="1in1out"
+QUICK_TARIFF="standard"
+QUICK_SITE_NAME="E-Parking"
+QUICK_ADMIN_USER="admin"
+QUICK_ADMIN_PASSWORD=""
+QUICK_ADMIN_PASSWORD_FILE=""
+QUICK_GATE_BASE_IP="192.168.1.100"
+QUICK_NO_DAEMONS=false
+QUICK_INCLUDE_LOCAL_SERIAL=false
 for arg in "$@"; do
     case "$arg" in
         --non-interactive) NON_INTERACTIVE=true ;;
-        -h|--help) sed -n '6,16p' "$0"; exit 0 ;;
+        --quick) QUICK=true; NON_INTERACTIVE=true ;;
+        --topology=*) QUICK_TOPOLOGY="${arg#*=}" ;;
+        --tariff=*) QUICK_TARIFF="${arg#*=}" ;;
+        --site-name=*) QUICK_SITE_NAME="${arg#*=}" ;;
+        --admin-user=*) QUICK_ADMIN_USER="${arg#*=}" ;;
+        --admin-password=*) QUICK_ADMIN_PASSWORD="${arg#*=}" ;;
+        --admin-password-file=*) QUICK_ADMIN_PASSWORD_FILE="${arg#*=}" ;;
+        --gate-base-ip=*) QUICK_GATE_BASE_IP="${arg#*=}" ;;
+        --no-daemons) QUICK_NO_DAEMONS=true ;;
+        --include-local-serial) QUICK_INCLUDE_LOCAL_SERIAL=true ;;
+        -h|--help) sed -n '6,30p' "$0"; exit 0 ;;
         *) error "unknown arg: $arg"; exit 2 ;;
     esac
 done
+
+# Quick topology: preset name or NinMout. Exit lanes are booth-driven; this
+# only controls how many gate ROWS get created.
+QUICK_IN=1
+QUICK_OUT=1
+case "$QUICK_TOPOLOGY" in
+    1in1out|1in1) QUICK_IN=1; QUICK_OUT=1 ;;
+    2in2out|2in2) QUICK_IN=2; QUICK_OUT=2 ;;
+    1in2out|1in2) QUICK_IN=1; QUICK_OUT=2 ;;
+    *in*out)
+        if [[ "$QUICK_TOPOLOGY" =~ ^([0-9]+)in([0-9]+)out$ ]]; then
+            QUICK_IN="${BASH_REMATCH[1]}"
+            QUICK_OUT="${BASH_REMATCH[2]}"
+        else
+            error "invalid --topology '${QUICK_TOPOLOGY}' (use 1in1out, 2in2out, 1in2out, NinMout)"
+            exit 2
+        fi
+        ;;
+    *)
+        error "invalid --topology '${QUICK_TOPOLOGY}' (use 1in1out, 2in2out, 1in2out, NinMout)"
+        exit 2
+        ;;
+esac
+
+if [[ "$QUICK_TARIFF" != "standard" && "$QUICK_TARIFF" != "mall" ]]; then
+    error "invalid --tariff '${QUICK_TARIFF}' (use standard or mall)"
+    exit 2
+fi
+if [[ -n "$QUICK_ADMIN_PASSWORD" && ${#QUICK_ADMIN_PASSWORD} -lt 8 ]]; then
+    error "--admin-password must be at least 8 characters"
+    exit 2
+fi
+
+TMP_ADMIN_PASSWORD_FILE=""
+trap 'rm -f "${TMP_ADMIN_PASSWORD_FILE:-}"' EXIT
 
 # ── 0. Preflight checks ───────────────────────────────────────────────────────
 step "0/12 — Preflight Checks"
@@ -103,11 +161,13 @@ fi
 # APP_ENV=production and this is unset, so always generate one.
 INTERNAL_API_KEY=$(openssl rand -hex 32)
 
-if ! $NON_INTERACTIVE; then
+# PARKING_SOURCE_DIR (set by installer/install-gui.sh): install from the
+# flashdisk copy instead of cloning, so no repo URL is needed.
+if ! $NON_INTERACTIVE && [[ -z "${PARKING_SOURCE_DIR:-}" ]]; then
     read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
     REPO_URL=${INPUT_REPO:-$REPO_URL}
 fi
-if [[ "$REPO_URL" == *your-org* ]]; then
+if [[ -z "${PARKING_SOURCE_DIR:-}" && "$REPO_URL" == *your-org* ]]; then
     error "REPO_URL is still the placeholder (your-org). Enter the real repository URL."
     exit 1
 fi
@@ -140,7 +200,7 @@ apt-get install -y -qq \
     redis-server \
     nginx \
     python3.12 python3.12-venv python3.12-dev python3-pip \
-    curl wget git unzip \
+    curl wget git unzip rsync \
     ffmpeg
 
 # Node.js 20
@@ -211,6 +271,13 @@ if [[ -d "$PROJECT_ROOT/.git" ]]; then
         sudo -u parking git pull --ff-only origin "$current_branch" \
             || warn "git pull failed (diverged/local changes) — continuing with existing checkout."
     fi
+elif [[ -n "${PARKING_SOURCE_DIR:-}" ]]; then
+    # ponytail: plain copy, no updates via git. Re-run from a newer stick to upgrade.
+    mkdir -p "$PROJECT_ROOT"
+    rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.nuxt \
+        --exclude=.output --exclude=graphify-out --exclude=__pycache__ \
+        "${PARKING_SOURCE_DIR}/" "$PROJECT_ROOT/"
+    chown -R parking:parking "$PROJECT_ROOT"
 else
     rm -rf "$PROJECT_ROOT"
     git clone "$REPO_URL" "$PROJECT_ROOT"
@@ -406,7 +473,9 @@ ok "Token written to /etc/parking/setup-token"
 
 # Booth enrollment token — booths redeem this at POST /api/setup/enroll to
 # fetch INTERNAL_API_KEY + Redis address (no hand-copying). Reusable for 24h.
-ENROLL_TOKEN=$(openssl rand -hex 32)
+# 12 hex chars (~48 bits) — short enough to type on a booth PC, protected by
+# the 10/min rate limit on /api/setup/enroll.
+ENROLL_TOKEN=$(openssl rand -hex 6 | tr 'a-f' 'A-F')
 echo -n "$ENROLL_TOKEN" > /etc/parking/enroll-token
 chown root:parking /etc/parking/enroll-token
 chmod 0640 /etc/parking/enroll-token
@@ -482,15 +551,17 @@ info "  systemctl status parking-worker-critical"
 info "  systemctl status parking-worker-bg"
 info "  systemctl status nginx"
 echo ""
-SETUP_URL="http://${SERVER_IP}/setup?token=${SETUP_TOKEN}"
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  OPEN THIS LINK ON THE INSTALLER LAPTOP TO FINISH CONFIGURATION${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo "  ${SETUP_URL}"
-echo ""
-echo "  Token expires when redeemed or after 24h, whichever comes first."
-echo "  Regenerate by re-running this script if you lose it."
+if ! $QUICK; then
+    SETUP_URL="http://${SERVER_IP}/setup?token=${SETUP_TOKEN}"
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}  OPEN THIS LINK ON THE INSTALLER LAPTOP TO FINISH CONFIGURATION${NC}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo "  ${SETUP_URL}"
+    echo ""
+    echo "  Token expires when redeemed or after 24h, whichever comes first."
+    echo "  Regenerate by re-running this script if you lose it."
+fi
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -503,7 +574,8 @@ echo "  Booths redeem this instead of copying INTERNAL_API_KEY by hand."
 echo "  Valid 24h, reusable for every booth. Regenerate: scripts/regen-enroll-token.sh"
 
 # Auto-launch a browser if a desktop session is present (X11 or Wayland).
-if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+# Quick mode skips the wizard entirely.
+if ! $QUICK && [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
     BROWSER_CMD=""
     for cand in google-chrome google-chrome-stable chromium chromium-browser firefox xdg-open; do
         if command -v "$cand" &>/dev/null; then
@@ -531,10 +603,67 @@ cd "$PROJECT_ROOT"
 # gate exists for. Wizard-dependent checks live in a plain re-run of
 # parking-doctor with no flags.
 if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --infra-only; then
-    ok "INSTALL VERIFIED — all infrastructure checks green. Next: open the setup link above."
+    ok "INSTALL VERIFIED — all infrastructure checks green."
 else
     error "INSTALL FAILED VERIFICATION — see the FAIL rows above."
     error "Fix them, then re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/parking_doctor.py --infra-only"
     exit 1
+fi
+
+# ── Quick provisioning (v1-style one-command setup) ──────────────────────────
+if $QUICK; then
+    step "Quick provisioning — admin, site, tariff, area, gates"
+
+    QUICK_ARGS=(
+        --admin-username "$QUICK_ADMIN_USER"
+        --site-name "$QUICK_SITE_NAME"
+        --tariff "$QUICK_TARIFF"
+        --in-count "$QUICK_IN"
+        --out-count "$QUICK_OUT"
+        --gate-base-ip "$QUICK_GATE_BASE_IP"
+    )
+
+    if [[ -n "$QUICK_ADMIN_PASSWORD_FILE" ]]; then
+        TMP_ADMIN_PASSWORD_FILE=$(mktemp /tmp/parking-admin.XXXXXX)
+        install -m 600 -o parking -g parking "$QUICK_ADMIN_PASSWORD_FILE" "$TMP_ADMIN_PASSWORD_FILE"
+        QUICK_ARGS+=(--admin-password-file "$TMP_ADMIN_PASSWORD_FILE")
+    elif [[ -n "$QUICK_ADMIN_PASSWORD" ]]; then
+        TMP_ADMIN_PASSWORD_FILE=$(mktemp /tmp/parking-admin.XXXXXX)
+        printf '%s' "$QUICK_ADMIN_PASSWORD" > "$TMP_ADMIN_PASSWORD_FILE"
+        chown parking:parking "$TMP_ADMIN_PASSWORD_FILE"
+        chmod 600 "$TMP_ADMIN_PASSWORD_FILE"
+        QUICK_ARGS+=(--admin-password-file "$TMP_ADMIN_PASSWORD_FILE")
+    fi
+
+    if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" \
+        "$PROJECT_ROOT/scripts/quickstart_provision.py" "${QUICK_ARGS[@]}"; then
+        ok "Quick provisioning complete — setup wizard bypassed."
+    else
+        error "Quick provisioning failed. Site is installed but setup_complete is not set."
+        error "Re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/quickstart_provision.py ${QUICK_ARGS[*]}"
+        exit 1
+    fi
+
+    if ! $QUICK_NO_DAEMONS; then
+        if $QUICK_INCLUDE_LOCAL_SERIAL; then
+            bash "$PROJECT_ROOT/scripts/enable-gate-daemons.sh" --run --include-local-serial \
+                || warn "Some gate daemons failed to enable — check: systemctl status 'parking-daemon-gate-*'"
+        else
+            bash "$PROJECT_ROOT/scripts/enable-gate-daemons.sh" --run \
+                || warn "Some gate daemons failed to enable — check: systemctl status 'parking-daemon-gate-*'"
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}  READY TO USE${NC}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo "  Admin URL : http://${SERVER_IP}/"
+    echo "  Username  : ${QUICK_ADMIN_USER}"
+    echo "  Password  : stored in /etc/parking/install-notes.txt (mode 0600)"
+    echo "  Gates     : ${QUICK_IN} IN + ${QUICK_OUT} OUT (default controllers .100+)"
+    echo "  Tariff    : ${QUICK_TARIFF}"
+    echo "  Notes     : sudo cat /etc/parking/install-notes.txt"
+    echo ""
 fi
 echo ""

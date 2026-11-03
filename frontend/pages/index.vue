@@ -1,84 +1,102 @@
 <template>
-  <div class="space-y-6">
+  <div class="mx-auto max-w-7xl space-y-8">
     <!-- Greeting bar -->
-    <div class="flex items-center justify-between">
+    <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h2 class="text-3xl font-black uppercase tracking-wide text-foreground">
+        <p class="text-xs font-semibold text-muted-foreground">Ringkasan operasional</p>
+        <h2 class="mt-1 text-2xl font-semibold tracking-tight text-foreground">
           {{ greeting }}, {{ authStore.user?.full_name || authStore.user?.username || 'Pengguna' }}
         </h2>
-        <p class="mt-1 text-sm font-medium text-muted-foreground">{{ formattedDate }}</p>
+        <p class="mt-1 text-sm text-muted-foreground">{{ formattedDate }}</p>
       </div>
-    </div>
+      <NuxtLink
+        v-if="authStore.isAdmin"
+        to="/transaksi"
+        class="text-sm font-medium text-info hover:underline"
+      >
+        Lihat transaksi
+      </NuxtLink>
+    </header>
 
-    <!-- Live status strip -->
-    <div class="flex items-center gap-4 border-2 border-foreground bg-surface px-4 py-3 text-sm shadow-brutal">
-      <div class="flex items-center gap-2">
-        <span
-          :class="['h-3 w-3 border border-foreground', activeCount > 0 ? 'bg-success animate-pulse' : 'bg-muted']"
-        />
-        <span class="font-bold uppercase text-foreground">Kendaraan aktif:</span>
-        <span class="font-black text-lg text-foreground">{{ loadingStatus ? '...' : activeCount }}</span>
+    <!-- Live metrics -->
+    <section class="grid gap-3 sm:grid-cols-3">
+      <div class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-muted-foreground">Kendaraan aktif</span>
+          <span :class="['h-2 w-2 rounded-full', activeCount > 0 ? 'bg-success' : 'bg-border']" />
+        </div>
+        <div class="mt-2 font-mono text-3xl font-semibold tabular-nums text-foreground">
+          {{ loadingStatus ? '—' : activeCount }}
+        </div>
+        <p class="mt-1 text-xs text-muted-foreground">Sedang berada di area parkir</p>
       </div>
-      <div class="h-6 w-0.5 bg-foreground" />
-      <div class="flex items-center gap-2">
-        <span
-          :class="['h-3 w-3 border border-foreground', unresolvedCount > 0 ? 'bg-warning animate-pulse' : 'bg-muted']"
-        />
-        <span class="font-bold uppercase text-foreground">Unresolved e-money:</span>
-        <span :class="['font-black text-lg', unresolvedCount > 0 ? 'text-warning' : 'text-foreground']">
-          {{ loadingStatus ? '...' : unresolvedCount }}
-        </span>
+
+      <div class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-muted-foreground">Unresolved e-money</span>
+          <span :class="['h-2 w-2 rounded-full', unresolvedCount > 0 ? 'bg-warning' : 'bg-border']" />
+        </div>
+        <div :class="['mt-2 font-mono text-3xl font-semibold tabular-nums', unresolvedCount > 0 ? 'text-warning' : 'text-foreground']">
+          {{ loadingStatus ? '—' : unresolvedCount }}
+        </div>
+        <p class="mt-1 text-xs text-muted-foreground">Transaksi butuh tindakan</p>
       </div>
-      <div class="h-6 w-0.5 bg-foreground" />
-      <div class="flex items-center gap-2">
-        <span class="font-bold uppercase text-foreground">Gate aktif:</span>
-        <span class="font-black text-lg text-foreground">{{ websiteStore.activeGateOuts.length + websiteStore.activeGateIns.length }}</span>
+
+      <div class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-muted-foreground">Gate aktif</span>
+          <span class="h-2 w-2 rounded-full bg-info" />
+        </div>
+        <div class="mt-2 font-mono text-3xl font-semibold tabular-nums text-foreground">
+          {{ websiteStore.activeGateOuts.length + websiteStore.activeGateIns.length }}
+        </div>
+        <p class="mt-1 text-xs text-muted-foreground">Lane masuk dan keluar</p>
       </div>
-    </div>
+    </section>
 
     <!-- Hero tile: POS Kiosk (operators only) -->
     <NuxtLink
       v-if="!authStore.isAdmin"
       to="/pos"
-      class="group flex items-center gap-6 border-4 border-foreground bg-primary p-6 shadow-brutal-lg transition-all duration-100 hover:translate-x-[4px] hover:translate-y-[4px] hover:shadow-none"
+      class="group flex items-center gap-5 rounded-xl border border-primary/40 bg-primary/10 p-5 transition-colors duration-150 hover:border-primary hover:bg-primary/15"
     >
-      <div class="flex h-14 w-14 shrink-0 items-center justify-center border-2 border-foreground bg-background text-foreground">
-        <svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <rect x="2" y="4" width="20" height="16" rx="2" />
           <path d="M2 10h20" />
           <path d="M12 4v6" />
         </svg>
       </div>
       <div class="flex-1 min-w-0">
-        <h3 class="text-2xl font-black uppercase tracking-wide text-foreground">Mulai POS Kiosk</h3>
-        <p class="mt-1 text-sm font-medium text-foreground/80">
+        <h3 class="text-xl font-semibold tracking-tight text-foreground">Mulai POS Kiosk</h3>
+        <p class="mt-1 text-sm text-muted-foreground">
           Mode layar penuh untuk operasional gate keluar
         </p>
-        <div class="mt-3 flex items-center gap-4 text-xs font-bold uppercase text-foreground">
-          <span v-if="posSession.shiftName">
-            Shift: <span class="bg-background border-2 border-foreground px-2 py-0.5 shadow-brutal-sm">{{ posSession.shiftName }}</span>
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span v-if="posSession.shiftName" class="rounded-md bg-surface px-2 py-0.5 font-medium">
+            Shift: {{ posSession.shiftName }}
           </span>
-          <span>
-            Transaksi: <span class="bg-background border-2 border-foreground px-2 py-0.5 shadow-brutal-sm">{{ posSession.transactionCount }}</span>
+          <span class="rounded-md bg-surface px-2 py-0.5 font-medium">
+            Transaksi: <span class="font-mono text-foreground">{{ posSession.transactionCount }}</span>
           </span>
-          <span>
-            Kas: <span class="bg-background border-2 border-foreground px-2 py-0.5 shadow-brutal-sm">{{ formatCurrency(posSession.cashCollected) }}</span>
+          <span class="rounded-md bg-surface px-2 py-0.5 font-medium">
+            Kas: <span class="font-mono text-foreground">{{ formatCurrency(posSession.cashCollected) }}</span>
           </span>
         </div>
       </div>
-      <div class="shrink-0 text-foreground transition-transform group-hover:translate-x-2">
-        <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+      <div class="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="M9 18l6-6-6-6" />
         </svg>
       </div>
     </NuxtLink>
 
-    <!-- Module grid -->
-    <div>
-      <h3 class="mb-4 text-sm font-black uppercase tracking-wider text-foreground border-b-2 border-foreground pb-2">Modul</h3>
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <!-- Operational modules -->
+    <section v-if="operatorModules.length">
+      <h3 class="mb-3 text-xs font-semibold text-muted-foreground">Operasional</h3>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <DashboardModuleTile
-          v-for="item in visibleModules"
+          v-for="item in operatorModules"
           :key="item.to"
           :title="item.title"
           :description="item.description"
@@ -87,7 +105,23 @@
           :badge="item.badge"
         />
       </div>
-    </div>
+    </section>
+
+    <!-- Administration modules -->
+    <section v-if="adminModules.length">
+      <h3 class="mb-3 text-xs font-semibold text-muted-foreground">Administrasi</h3>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <DashboardModuleTile
+          v-for="item in adminModules"
+          :key="item.to"
+          :title="item.title"
+          :description="item.description"
+          :icon="item.icon"
+          :to="item.to"
+          :badge="item.badge"
+        />
+      </div>
+    </section>
   </div>
 </template>
 
@@ -131,6 +165,14 @@ const modules = ref(allModules.map((m) => ({ ...m })))
 
 const visibleModules = computed(() =>
   modules.value.filter((m) => !m.adminOnly || authStore.isAdmin)
+)
+
+const operatorModules = computed(() =>
+  visibleModules.value.filter((m) => !m.adminOnly)
+)
+
+const adminModules = computed(() =>
+  visibleModules.value.filter((m) => m.adminOnly)
 )
 
 const greeting = computed(() => {

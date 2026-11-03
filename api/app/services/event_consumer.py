@@ -175,7 +175,8 @@ class EventConsumer:
 
     async def _handle_rfid_card_read(self, payload: dict) -> None:
         """RFID/UHF card read — branches on gate direction: entry creates tx, exit closes tx."""
-        from datetime import date
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
 
         from sqlalchemy import select
 
@@ -183,6 +184,7 @@ class EventConsumer:
         from api.app.services.gate_command import publish_command
         from api.app.services.transaction import create_entry_transaction
         from api.database import AsyncSessionLocal
+        from shared.config import get_settings
         from shared.events import (
             DisplayTextCommand,
             OpenGateCommand,
@@ -213,6 +215,10 @@ class EventConsumer:
                             card_number=card_number,
                         )
                         await db.commit()
+                        # Daemon-driven OUT lane: the API must issue the open.
+                        # Booth-driven exits open locally in booth_bridge, so
+                        # this command is harmless there (no daemon consumes it).
+                        await publish_command(OpenGateCommand(gate_id=gate_code))
                         logger.info("rfid_exit_gate_opened", gate_id=gate_code)
                     except ValueError as e:
                         msg = str(e)
@@ -239,7 +245,10 @@ class EventConsumer:
                     await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Aktif", audio_track=4))
                     return
 
-                if member.valid_until and member.valid_until < date.today():
+                local_today = datetime.now(
+                    ZoneInfo(get_settings().app_timezone)
+                ).date()
+                if member.valid_until and member.valid_until < local_today:
                     await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Expired", line2="", audio_track=3))
                     logger.info("rfid_member_expired", gate_id=gate_code, card=card_number)
                     return
@@ -258,15 +267,17 @@ class EventConsumer:
 
                 # Expiry warning — warn but allow entry (matches legacy MT00011/MT00012 behavior)
                 if member.valid_until:
-                    days_left = (member.valid_until - date.today()).days
+                    days_left = (member.valid_until - local_today).days
+                    # Publish warnings without sleeping: this is the single
+                    # consumer for every gate, so a 6s sleep here delayed all
+                    # other lanes' card reads. The daemon queues display/audio
+                    # before the open command, preserving the warning UX.
                     if days_left == 1:
                         await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Kartu Habis", line2="Dalam 1 Hari"))
                         await publish_command(PlayAudioCommand(gate_id=gate_code, track=12))
-                        await asyncio.sleep(6)
                     elif days_left == 5:
                         await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Kartu Habis", line2="Dalam 5 Hari"))
                         await publish_command(PlayAudioCommand(gate_id=gate_code, track=11))
-                        await asyncio.sleep(6)
 
                 await create_entry_transaction(
                     db,

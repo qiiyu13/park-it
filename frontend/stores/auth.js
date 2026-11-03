@@ -13,7 +13,12 @@ import { defineStore } from 'pinia'
 // still need a real session cookie, so data tables may 401 / stay empty — this
 // only unlocks the UI shell + admin nav for visual review.
 const DEV_ADMIN = { id: 0, username: 'dev-admin', full_name: 'Dev Admin (no login)', role: 'admin' }
-const devFallbackUser = () => (import.meta.dev ? { ...DEV_ADMIN } : null)
+// Opt-in only: otherwise the dev server silently bypasses the login page and
+// masks auth/route bugs (e.g. the /setup ↔ /login regression).
+const devFallbackUser = () => {
+  if (!import.meta.dev) return null
+  return useRuntimeConfig().public.devAuth ? { ...DEV_ADMIN } : null
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const { fetchApi } = useApi()
@@ -46,7 +51,9 @@ export const useAuthStore = defineStore('auth', () => {
       }
       return data
     } catch (err) {
-      error.value = err.message || 'Login failed'
+      error.value = err.status === 401
+        ? 'Username atau password salah'
+        : (err.message || 'Login gagal')
       throw err
     } finally {
       isLoading.value = false

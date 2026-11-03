@@ -1,14 +1,14 @@
 <template>
   <article
     :class="[
-      'border-2 border-foreground bg-surface p-4 shadow-brutal transition-all duration-100',
-      online ? 'border-l-4 border-l-success' : '',
+      'border border-border bg-surface p-4 shadow-brutal transition-all duration-100',
+      online ? 'border-l border-l-success' : '',
     ]"
   >
     <header class="flex items-start justify-between gap-2">
       <div>
         <p class="text-xs font-mono font-bold text-muted-foreground">{{ gate.code }}</p>
-        <h3 class="font-black uppercase tracking-wide text-foreground">{{ gate.name }}</h3>
+        <h3 class="font-bold  tracking-wide text-foreground">{{ gate.name }}</h3>
       </div>
       <StatusPill :status="online ? 'online' : 'offline'" />
     </header>

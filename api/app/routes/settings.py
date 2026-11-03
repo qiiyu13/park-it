@@ -1,12 +1,13 @@
 """Settings routes."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import require_admin, require_auth
 from api.app.models.setting import Setting
 from api.app.schemas.setting import SettingResponse, SettingUpdate
+from api.app.services.audit import log_action
 from api.database import get_db
 from shared.logging import get_logger
 
@@ -50,6 +51,7 @@ async def get_setting(
 async def update_setting(
     key: str,
     data: SettingUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ) -> SettingResponse:
@@ -67,8 +69,25 @@ async def update_setting(
             detail="Cannot clear a system setting",
         )
 
+    previous = setting.value
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(setting, field, value)
+
+    try:
+        user_id = int(current_user["sub"])
+    except (KeyError, TypeError, ValueError):
+        user_id = None
+    await log_action(
+        db,
+        action="SETTING_UPDATE",
+        user_id=user_id,
+        username=current_user.get("username"),
+        entity_type="Setting",
+        entity_id=key,
+        details={"old": previous, "new": setting.value},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
     await db.commit()
     await db.refresh(setting)

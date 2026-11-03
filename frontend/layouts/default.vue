@@ -4,38 +4,42 @@
     <aside
       v-if="authStore.isLoggedIn"
       :class="[
-        'flex shrink-0 flex-col border-r-4 border-foreground bg-foreground text-background transition-all duration-200',
+        'flex shrink-0 flex-col border-r border-white/10 bg-sidebar text-sidebar-foreground transition-all duration-200',
         collapsed ? 'w-16' : 'w-60',
       ]"
     >
       <!-- Logo -->
       <div
-        class="flex h-14 items-center gap-3 border-b-2 border-background/20 px-4 cursor-pointer"
+        class="flex h-16 items-center gap-3 border-b border-white/10 px-4 cursor-pointer"
         @click="collapsed = !collapsed"
       >
-        <div class="flex h-8 w-8 shrink-0 items-center justify-center border-2 border-background bg-primary text-foreground">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <BrandIcon class="h-[18px] w-[18px]" />
         </div>
         <Transition name="fade-text">
-          <span v-show="!collapsed" class="text-sm font-black uppercase tracking-wide">E-Parking</span>
+          <span v-show="!collapsed" class="text-sm font-semibold tracking-tight">E-Parking</span>
         </Transition>
       </div>
 
       <!-- Navigation -->
-      <nav class="flex-1 overflow-y-auto p-2 space-y-1">
+      <nav class="flex-1 overflow-y-auto p-3 space-y-1">
         <NuxtLink
           v-for="item in visibleItems"
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 border-2 px-3 py-2 text-sm font-bold uppercase tracking-wide transition-all duration-100',
+            'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150',
             isActive(item.path)
-              ? 'border-background bg-primary text-foreground shadow-brutal-sm'
-              : 'border-transparent text-background/70 hover:border-background hover:bg-background/10 hover:text-background',
+              ? 'bg-white/10 text-sidebar-foreground'
+              : 'text-sidebar-muted hover:bg-white/5 hover:text-sidebar-foreground',
           ]"
           :title="item.label"
         >
-          <component :is="item.icon" class="h-5 w-5 shrink-0" :stroke-width="2" />
+          <component
+            :is="item.icon"
+            :class="['h-5 w-5 shrink-0', isActive(item.path) ? 'text-primary' : '']"
+            :stroke-width="2"
+          />
           <Transition name="fade-text">
             <span v-show="!collapsed">{{ item.label }}</span>
           </Transition>
@@ -43,9 +47,9 @@
       </nav>
 
       <!-- Footer -->
-      <div class="border-t-2 border-background/20 p-2">
+      <div class="border-t border-white/10 p-3">
         <button
-          class="flex w-full items-center gap-3 border-2 border-transparent px-3 py-2 text-sm font-bold uppercase text-destructive transition-all hover:border-destructive hover:bg-destructive hover:text-white"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-muted transition-colors hover:bg-destructive/15 hover:text-white"
           @click="logout"
         >
           <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -61,28 +65,28 @@
     <!-- Main area -->
     <div class="flex flex-1 flex-col overflow-hidden min-w-0">
       <!-- Header -->
-      <header v-if="authStore.isLoggedIn" class="flex h-14 shrink-0 items-center justify-between border-b-4 border-foreground bg-background px-6">
-        <h1 class="text-lg font-black uppercase tracking-wide text-foreground">{{ pageTitle }}</h1>
+      <header v-if="authStore.isLoggedIn" class="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface/90 px-6 backdrop-blur">
+        <h1 class="text-base font-semibold tracking-tight text-foreground">{{ pageTitle }}</h1>
         <div class="flex items-center gap-4">
-          <span class="font-mono text-sm font-bold text-foreground">{{ clock }}</span>
+          <span class="font-mono text-sm text-muted-foreground">{{ clock }}</span>
           <span
 :class="[
-            'border-2 border-foreground px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm',
-            authStore.isAdmin ? 'bg-destructive text-white' : 'bg-primary text-foreground',
+            'rounded-full border border-border px-2.5 py-0.5 text-[11px] font-semibold',
+            authStore.isAdmin ? 'bg-primary/15 text-foreground' : 'bg-info/10 text-info',
           ]">
             {{ authStore.user?.role }}
           </span>
           <div class="flex items-center gap-2">
-            <div class="flex h-7 w-7 items-center justify-center border-2 border-foreground bg-primary text-xs font-black text-foreground">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-primary/20 text-xs font-semibold text-foreground">
               {{ avatarInitial }}
             </div>
-            <span class="text-sm font-medium text-foreground">{{ authStore.user?.username }}</span>
+            <span class="text-sm text-muted-foreground">{{ authStore.user?.username }}</span>
           </div>
         </div>
       </header>
 
       <!-- Content -->
-      <main class="flex-1 overflow-y-auto p-6">
+      <main class="flex-1 overflow-y-auto p-6 lg:p-8">
         <slot />
       </main>
     </div>

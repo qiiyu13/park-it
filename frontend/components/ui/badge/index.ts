@@ -4,17 +4,17 @@ import { cva } from "class-variance-authority"
 export { default as Badge } from "./Badge.vue"
 
 export const badgeVariants = cva(
-  "inline-flex gap-1 items-center border-2 border-foreground px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-brutal-sm",
+  "inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-0.5 text-[11px] font-semibold",
   {
     variants: {
       variant: {
-        default: "bg-primary text-foreground",
-        secondary: "bg-surface text-foreground",
-        destructive: "bg-destructive text-white",
-        success: "bg-success text-white",
-        warning: "bg-warning text-foreground",
-        info: "bg-info text-white",
-        outline: "bg-background text-foreground",
+        default: "border-primary/30 bg-primary/15 text-foreground",
+        secondary: "bg-muted text-foreground",
+        destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+        success: "border-success/20 bg-success/10 text-success",
+        warning: "border-warning/20 bg-warning/10 text-warning",
+        info: "border-info/20 bg-info/10 text-info",
+        outline: "bg-transparent text-foreground",
       },
     },
     defaultVariants: {

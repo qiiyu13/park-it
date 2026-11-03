@@ -1,0 +1,13 @@
+[Unit]
+Description=E-Parking first-boot install
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/parking/firstboot.done
+
+[Service]
+Type=oneshot
+TimeoutStartSec=0
+ExecStart=/opt/eparking-installer/installer/firstboot/run.sh
+
+[Install]
+WantedBy=multi-user.target

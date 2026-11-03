@@ -121,8 +121,8 @@ function lastEvent(code) {
 
 function gateCardClass(code) {
   const s = gateStates[code]?.state
-  if (s === 'OPENING') return 'border-l-4 border-l-green-500'
-  if (s?.includes('WAITING') || s === 'VEHICLE_PRESENT' || s === 'PROCESSING') return 'border-l-4 border-l-primary'
+  if (s === 'OPENING') return 'border-l border-l-green-500'
+  if (s?.includes('WAITING') || s === 'VEHICLE_PRESENT' || s === 'PROCESSING') return 'border-l border-l-primary'
   return ''
 }
 

@@ -53,9 +53,13 @@ async def log_action(
             ip_address=ip_address,
             user_agent=user_agent,
         )
-        db.add(log)
-        await db.flush()
-        await db.refresh(log)
+        # Savepoint: if the audit insert fails, only the audit work is rolled
+        # back. A bare flush failure poisons the whole session and makes the
+        # caller's later commit raise PendingRollbackError.
+        async with db.begin_nested():
+            db.add(log)
+            await db.flush()
+            await db.refresh(log)
 
         logger.info(
             "audit_log_created",

@@ -68,8 +68,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# Vendored skill tooling + generated graph output — not our code to lint.
-extend-exclude = [".agents", "graphify-out"]
+extend-exclude = ["graphify-out"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
@@ -121,7 +120,7 @@ disable_error_code = [
 # Without this, `protocols/tests` and the top-level `tests` package both claim
 # the module name `tests` and mypy aborts before checking anything.
 explicit_package_bases = true
-exclude = ["^\\.venv/", "^\\.agents/", "^graphify-out/", "^frontend/"]
+exclude = ["^\\.venv/", "^graphify-out/", "^frontend/"]
 
 # Test code: annotating every fixture and test function buys nothing.
 [[tool.mypy.overrides]]

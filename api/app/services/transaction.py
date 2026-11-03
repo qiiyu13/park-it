@@ -6,11 +6,12 @@ including entry creation, active transaction lookup, and exit completion.
 
 from datetime import UTC, datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.app.models import ParkingTransaction, VehicleType
+from api.app.models import AreaParkir, Gate, ParkingTransaction, VehicleType
 from api.app.services.snapshot_utils import enqueue_snapshots_for_gate
 from api.app.services.tariff import (
     DEFAULT_TARIFF_CONFIG,
@@ -18,6 +19,7 @@ from api.app.services.tariff import (
     VehicleTypeRate,
     calculate_tariff,
 )
+from shared.config import get_settings
 from shared.logging import get_logger
 
 logger = get_logger("transaction_service")
@@ -64,9 +66,9 @@ async def create_entry_transaction(
     await db.flush()
     await db.refresh(tx)
 
-    # Enqueue entry snapshot(s) for all cameras on this gate
+    # Enqueue entry snapshot(s) for all cameras on this gate, and keep the
+    # area occupancy counter in sync (atomic SQL, safe under concurrent lanes).
     if gate_in_id:
-        from api.app.models import Gate
         gate = await db.get(Gate, gate_in_id)
         if gate:
             await enqueue_snapshots_for_gate(
@@ -75,6 +77,12 @@ async def create_entry_transaction(
                 transaction_id=tx.id,
                 snapshot_type="entry",
             )
+            if gate.area_parkir_id:
+                await db.execute(
+                    update(AreaParkir)
+                    .where(AreaParkir.id == gate.area_parkir_id)
+                    .values(current=AreaParkir.current + 1)
+                )
 
     logger.info(
         "transaction_created",
@@ -214,10 +222,14 @@ async def calculate_transaction_fee(
         )
         exit_time = transaction.entry_time
 
+    # Tariffs use local calendar boundaries ("midnight" overnight surcharge),
+    # so convert both instants to the facility timezone before the engine sees
+    # them. Duration is timezone-invariant; only the date crossing changes.
+    tz = ZoneInfo(get_settings().app_timezone)
     try:
         fee = calculate_tariff(
-            entry_time=transaction.entry_time,
-            exit_time=exit_time,
+            entry_time=transaction.entry_time.astimezone(tz),
+            exit_time=exit_time.astimezone(tz),
             vehicle_type_code=vt_code,
             config=config,
             is_lost_ticket=transaction.is_lost_ticket,
@@ -278,6 +290,19 @@ async def complete_exit_transaction(
     transaction.operator_id = operator_id
     transaction.shift_id = shift_id
     transaction.status = "COMPLETED"
+
+    # Release one slot in the entry gate's area. GREATEST(...,0) prevents the
+    # negative occupancy the legacy system was famous for when counters drift.
+    if transaction.gate_in_id is not None:
+        area_id = await db.scalar(
+            select(Gate.area_parkir_id).where(Gate.id == transaction.gate_in_id)
+        )
+        if area_id is not None:
+            await db.execute(
+                update(AreaParkir)
+                .where(AreaParkir.id == area_id)
+                .values(current=func.greatest(AreaParkir.current - 1, 0))
+            )
 
     await db.flush()
     await db.refresh(transaction)

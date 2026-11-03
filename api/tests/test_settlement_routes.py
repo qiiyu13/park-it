@@ -36,12 +36,26 @@ class TestSettlements:
         assert response.json() == []
 
     async def test_trigger_settlement(self, client: AsyncClient):
-        from unittest.mock import patch
-        with patch("workers.background.settlement_worker.generate_settlement_file") as mock_worker:
-            mock_worker.return_value = {"status": "success", "files_generated": 2, "total_transactions": 10}
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        arq = MagicMock()
+        arq.enqueue_job = AsyncMock()
+        with patch("shared.redis.get_arq_redis", new=AsyncMock(return_value=arq)):
             response = await client.post("/api/settlements/trigger")
+
         assert response.status_code == 200
         data = response.json()
-        assert "status" in data
-        assert "files_generated" in data
-        assert data["files_generated"] == 2
+        assert data["status"] == "queued"
+        arq.enqueue_job.assert_awaited_once()
+        assert arq.enqueue_job.await_args.args[0] == "generate_settlement_file"
+
+    async def test_trigger_settlement_queue_unavailable(self, client: AsyncClient):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "shared.redis.get_arq_redis",
+            new=AsyncMock(side_effect=ConnectionError("redis down")),
+        ):
+            response = await client.post("/api/settlements/trigger")
+
+        assert response.status_code == 503

@@ -103,6 +103,15 @@ class BackgroundWorkerSettings:
             hour=3,
             minute=0,
         ),
+        # Snapshot retention was implemented but never scheduled — the job is
+        # now registered (30 min after session cleanup so the two don't
+        # contend for the same rows).
+        cron(
+            "workers.background.cleanup_worker.cleanup_old_snapshots",
+            name="cleanup_old_snapshots",
+            hour=3,
+            minute=30,
+        ),
         # Timeout stuck PENDING e-money payments every 5 minutes
         cron(
             "workers.background.cleanup_worker.timeout_pending_payments",

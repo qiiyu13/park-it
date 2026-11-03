@@ -20,7 +20,7 @@ class OperatorAlert(Base, IntPKMixin, TimestampMixin):
 
     alert_type: Mapped[str] = mapped_column(
         String(30), nullable=False, index=True
-    )  # TIMEOUT, HARDWARE_FAILURE, SENSOR_STUCK, LOST_CONTACT, CORRECTION_FAILED
+    )  # TIMEOUT, HARDWARE_FAILURE, SENSOR_STUCK, LOST_CONTACT, CORRECTION_FAILED, WORKER_UNCOVERED
 
     message: Mapped[str] = mapped_column(Text, nullable=False)
 

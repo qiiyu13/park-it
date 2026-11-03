@@ -19,6 +19,7 @@ from api.app.schemas.payment import (
     TransactionLookupRequest,
     TransactionLookupResponse,
 )
+from api.app.services.audit import log_action
 from api.app.services.payment import (
     process_cash_payment,
     process_emoney_deduct,
@@ -82,6 +83,33 @@ def _get_operator_id(user: dict) -> int | None:
     return int(sub) if sub else None
 
 
+async def _audit_payment(
+    db: AsyncSession,
+    request: Request,
+    user: dict | None,
+    action: str,
+    transaction,
+    fee: int | None,
+    method: str,
+) -> None:
+    """Record a completed payment in audit_logs (best-effort, never blocks)."""
+    try:
+        user_id = int(user["sub"]) if user and user.get("sub") is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+    await log_action(
+        db,
+        action=action,
+        user_id=user_id,
+        username=(user or {}).get("username", "booth-bridge"),
+        entity_type="ParkingTransaction",
+        entity_id=str(transaction.id),
+        details={"payment_method": method, "fee": fee},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
 @router.post("/cash", response_model=PaymentResponse)
 async def cash_payment(
     request: Request,
@@ -116,6 +144,9 @@ async def cash_payment(
             change_amount=result["change_amount"],
             payment_method="CASH",
             receipt_queued=True,
+        )
+        await _audit_payment(
+            db, request, user, "CASH_PAYMENT", result["transaction"], result["fee"], "CASH"
         )
         await _store_idempotency(x_idempotency_key, resp)
         return resp
@@ -157,6 +188,9 @@ async def rfid_payment(
             fee=0,
             change_amount=0,
             payment_method="RFID_MEMBER",
+        )
+        await _audit_payment(
+            db, request, user, "RFID_PAYMENT", result["transaction"], 0, "RFID_MEMBER"
         )
         await _store_idempotency(x_idempotency_key, resp)
         return resp
@@ -238,6 +272,16 @@ async def emoney_result(
             tid=result.tid,
             operator_id=_get_operator_id(user),
         )
+        if proc_result["success"]:
+            await _audit_payment(
+                db,
+                request,
+                user,
+                "EMONEY_PAYMENT",
+                proc_result["transaction"],
+                result.deduct_amount,
+                "EMONEY",
+            )
         return PaymentResponse(
             success=proc_result["success"],
             message="E-money payment processed" if proc_result["success"] else "E-money payment failed",
@@ -272,6 +316,9 @@ async def rfid_booth(
             operator_id=None,
         )
         payment_success_total.labels(method="rfid").inc()
+        await _audit_payment(
+            db, request, None, "RFID_PAYMENT", result["transaction"], 0, "RFID_MEMBER"
+        )
         return PaymentResponse(
             success=True,
             message="RFID payment successful",
@@ -322,6 +369,16 @@ async def emoney_booth_result(
             tid=result.tid,
             operator_id=None,
         )
+        if proc_result["success"]:
+            await _audit_payment(
+                db,
+                request,
+                None,
+                "EMONEY_PAYMENT",
+                proc_result["transaction"],
+                result.deduct_amount,
+                "EMONEY",
+            )
         return PaymentResponse(
             success=proc_result["success"],
             message="E-money payment processed" if proc_result["success"] else "E-money payment failed",

@@ -8,6 +8,7 @@ from protocols.passti.frame import (
     STATUS_MESSAGES,
     _bcd_timeout,
     build_frame,
+    build_response,
     parse_response,
 )
 
@@ -36,6 +37,29 @@ class TestBuildFrame:
         """Frame ends with LRC checksum."""
         frame = build_frame(0x02, b"\x01\x02\x03")
         assert len(frame) > 6
+
+
+class TestBuildResponse:
+    """Responses use RESP_CODE+STATUS, not the EF 01 CMD command header."""
+
+    def test_success_roundtrip(self):
+        raw = build_response(0x00, b"\x00\x00\x00", b"\x01\x02\x03")
+        parsed = parse_response(raw)
+        assert parsed["ok"] is True
+        assert parsed["resp_code"] == 0x00
+        assert parsed["status"] == (0, 0, 0)
+        assert parsed["body"] == b"\x01\x02\x03"
+
+    def test_error_roundtrip(self):
+        raw = build_response(0x00, b"\x01\x10\x05")
+        parsed = parse_response(raw)
+        assert parsed["ok"] is False
+        assert parsed["status"] == (0x01, 0x10, 0x05)
+        assert parsed["status_msg"] == "Lost contact"
+
+    def test_status_must_be_three_bytes(self):
+        with pytest.raises(ValueError):
+            build_response(0x00, b"\x00\x00")
 
 
 class TestParseResponse:

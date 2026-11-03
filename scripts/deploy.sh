@@ -5,7 +5,6 @@ set -euo pipefail
 # Usage: ./scripts/deploy.sh
 
 APP_DIR="/opt/parking-system-v2"
-FRONTEND_DIR="/var/www/parking-frontend"
 USER="parking"
 
 echo "=== E-Parking v2 Deployment ==="
@@ -16,39 +15,43 @@ cd "$APP_DIR/frontend"
 npm install
 npm run build
 
-# 2. Copy frontend to web root
-echo "[2/6] Copying frontend build..."
-mkdir -p "$FRONTEND_DIR"
-cp -r "$APP_DIR/frontend/.output/public/"* "$FRONTEND_DIR/"
+# 2. Frontend: Nuxt/Nitro output is built in place and served by
+# parking-frontend.service. (The old copy to /var/www was a leftover from a
+# static-nginx deployment and diverged from the systemd host layout.)
+echo "[2/6] Frontend build is in place (served by parking-frontend.service)..."
 
-# 3. Update Python dependencies
+# 3. Update Python dependencies (production deps only)
 echo "[3/6] Updating Python dependencies..."
 cd "$APP_DIR"
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e .
 
-# 4. Run database migrations
+# 4. Run database migrations (alembic.ini lives at the repo root)
 echo "[4/6] Running database migrations..."
-cd "$APP_DIR/api"
+cd "$APP_DIR"
 alembic upgrade head
 
-# 5. Copy nginx config
-echo "[5/6] Updating nginx configuration..."
-sudo cp "$APP_DIR/docker/nginx.conf" /etc/nginx/sites-available/parking
-sudo nginx -t && sudo systemctl reload nginx
+# 5. Validate nginx. The host config is owned by the installer; never copy
+# docker/nginx.conf here — its upstreams are compose service names and would
+# break every /api request on a systemd host.
+echo "[5/6] Validating nginx configuration..."
+if [ -f /etc/nginx/sites-available/parking ]; then
+    sudo nginx -t && sudo systemctl reload nginx
+else
+    echo "  (no /etc/nginx/sites-available/parking — skipping nginx reload)"
+fi
 
 # 6. Restart services
 echo "[6/6] Restarting services..."
 sudo systemctl daemon-reload
 sudo systemctl restart parking-api
+sudo systemctl restart parking-events
 sudo systemctl restart parking-worker-critical
 sudo systemctl restart parking-worker-bg
+sudo systemctl restart parking-frontend
 
-# Restart gate daemons (if any are enabled)
+# Restart gate-in daemons (exit lanes are driven by booth_bridge, not a unit)
 for service in $(systemctl list-units --plain --no-legend 'parking-daemon-gate-in@*' | awk '{print $1}'); do
-    sudo systemctl restart "$service"
-done
-for service in $(systemctl list-units --plain --no-legend 'parking-daemon-gate-out@*' | awk '{print $1}'); do
     sudo systemctl restart "$service"
 done
 

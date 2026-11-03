@@ -1,6 +1,7 @@
 """POS (booth) management routes."""
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
@@ -8,18 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.api_key import require_api_key
 from api.app.middleware.auth import require_admin, require_auth
+from api.app.models.gate import Gate
 from api.app.models.parking_transaction import ParkingTransaction
 from api.app.models.pos import Pos
 from api.app.schemas.common import SuccessResponse
 from api.app.schemas.pos import (
     BoothHeartbeat,
     BoothHeartbeatResponse,
+    BoothRegisterRequest,
     PosCreate,
     PosResponse,
     PosUpdate,
 )
 from api.app.services.shift_utils import get_current_shift
 from api.database import get_db
+from shared.config import get_settings
 from shared.logging import get_logger
 
 logger = get_logger("pos_routes")
@@ -76,8 +80,13 @@ async def get_shift_summary(
 
     Used by POS frontend status bar. Falls back to empty payload if no active shift.
     """
-    now = datetime.now()
-    today_start = datetime.combine(now.date(), time.min)
+    # Shift totals are an operational-day concept: build tz-aware bounds in
+    # the facility timezone. Comparing a naive local midnight to a timestamptz
+    # column shifted the window by the UTC offset (7h in Jakarta).
+    tz = ZoneInfo(get_settings().app_timezone)
+    now = datetime.now(tz)
+    today_start = datetime.combine(now.date(), time.min, tzinfo=tz)
+    tomorrow_start = today_start + timedelta(days=1)
 
     # Resolve current shift by wall-clock time (handles overnight wrap)
     active_shift = await get_current_shift(db)
@@ -94,6 +103,7 @@ async def get_shift_summary(
         func.count(ParkingTransaction.id),
     ).where(
         ParkingTransaction.exit_time >= today_start,
+        ParkingTransaction.exit_time < tomorrow_start,
         ParkingTransaction.payment_method == "CASH",
     )
     if operator_id_int is not None:
@@ -152,6 +162,58 @@ async def booth_heartbeat(
     }
     await db.commit()
     return BoothHeartbeatResponse(booth_code=pos.code, last_seen_at=now)
+
+
+@router.post("/register", response_model=PosResponse, status_code=status.HTTP_201_CREATED)
+async def register_booth(
+    payload: BoothRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_api_key),
+) -> PosResponse:
+    """Enrolled booth self-registration (machine-to-machine).
+
+    Replaces the manual "add POS row" step in the admin UI. A booth that
+    completed enrollment already holds the server-wide API key, so creating
+    its own row is no additional privilege. Idempotent by booth_code.
+    """
+    gate = None
+    if payload.default_gate_code:
+        gate = (
+            await db.execute(
+                select(Gate).where(Gate.code == payload.default_gate_code)
+            )
+        ).scalar_one_or_none()
+
+    result = await db.execute(select(Pos).where(Pos.code == payload.booth_code))
+    pos = result.scalar_one_or_none()
+    if pos is None:
+        pos = Pos(
+            name=payload.name,
+            code=payload.booth_code,
+            ip_address=payload.ip_address,
+            default_gate_id=gate.id if gate else None,
+            booth_peripherals={},
+            is_active=True,
+        )
+        db.add(pos)
+    else:
+        pos.name = payload.name
+        if payload.ip_address:
+            pos.ip_address = payload.ip_address
+        if gate is not None:
+            pos.default_gate_id = gate.id
+        pos.is_active = True
+
+    await db.commit()
+    await db.refresh(pos)
+    logger.info(
+        "booth_registered",
+        pos_id=pos.id,
+        code=pos.code,
+        gate=payload.default_gate_code,
+        gate_found=gate is not None,
+    )
+    return PosResponse.model_validate(pos)
 
 
 @router.get("", response_model=list[PosResponse])

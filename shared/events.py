@@ -4,6 +4,7 @@ Daemon -> FastAPI: parking.events.{gate_id} (Pub/Sub)
 FastAPI -> Daemon: parking.commands.{gate_id} (Redis Streams)
 """
 
+import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
@@ -93,6 +94,9 @@ class BaseCommand(BaseModel):
     command_type: str
     gate_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Correlation id propagated through the Redis command stream so daemon log
+    # lines can be tied back to the API request that issued the command.
+    trace_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:16])
 
 
 class OpenGateCommand(BaseCommand):
@@ -107,6 +111,13 @@ class CloseGateCommand(BaseCommand):
     """Close the gate."""
 
     command_type: Literal["close_gate"] = "close_gate"
+    reason: str = "operator"
+
+
+class BrakeGateCommand(BaseCommand):
+    """Brake/stop the barrier motor (TRIPLE relay mode only)."""
+
+    command_type: Literal["brake_gate"] = "brake_gate"
     reason: str = "operator"
 
 
@@ -156,6 +167,7 @@ class RejectCardCommand(BaseCommand):
 RedisCommand = (
     OpenGateCommand
     | CloseGateCommand
+    | BrakeGateCommand
     | PlayAudioCommand
     | DisplayTextCommand
     | PrintTicketThenOpenCommand

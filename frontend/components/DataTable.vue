@@ -22,14 +22,14 @@
     </div>
 
     <!-- Table -->
-    <div class="overflow-x-auto border-2 border-foreground shadow-brutal">
+    <div class="overflow-x-auto rounded-lg border border-border bg-surface shadow-brutal-sm">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b-2 border-foreground bg-foreground text-background">
+          <tr class="border-b border-border bg-muted/60 text-foreground">
             <th
               v-for="col in columns"
               :key="col.prop"
-              class="px-4 py-3 text-left font-black uppercase tracking-wider"
+              class="px-4 py-3 text-left text-[11px] font-semibold tracking-wider text-muted-foreground"
               :style="col.width ? { width: col.width + 'px' } : {}"
             >
               <button
@@ -44,7 +44,7 @@
               </button>
               <span v-else>{{ col.label }}</span>
             </th>
-            <th v-if="showActions" class="w-24 px-4 py-3 text-left font-black uppercase tracking-wider">Aksi</th>
+            <th v-if="showActions" class="w-24 px-4 py-3 text-left font-bold  tracking-wider">Aksi</th>
           </tr>
         </thead>
         <tbody>
@@ -71,7 +71,7 @@
           <tr
             v-for="(row, idx) in displayedData"
             :key="idx"
-            class="border-b-2 border-foreground last:border-0 hover:bg-primary/20 transition-colors"
+            class="border-b border-border last:border-0 hover:bg-primary/20 transition-colors"
           >
             <td
               v-for="col in columns"
@@ -82,7 +82,7 @@
               <span
                 v-if="col.type === 'boolean'"
                 :class="[
-                  'inline-flex border-2 border-foreground px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm',
+                  'inline-flex border border-border px-2 py-0.5 text-xs font-bold  shadow-brutal-sm',
                   row[col.prop] ? 'bg-success text-white' : 'bg-muted text-muted-foreground',
                 ]"
               >
@@ -92,7 +92,7 @@
               <!-- Enum type -->
               <span
                 v-else-if="col.type === 'enum'"
-                class="inline-flex border-2 border-foreground bg-primary px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm"
+                class="inline-flex border border-border bg-primary px-2 py-0.5 text-xs font-bold  shadow-brutal-sm"
               >
                 {{ row[col.prop] }}
               </span>
@@ -112,7 +112,7 @@
                 <slot name="row-actions" :row="row" />
                 <button
                   v-if="showEdit"
-                  class="border-2 border-transparent p-1.5 text-muted-foreground transition-all hover:border-foreground hover:bg-primary hover:text-foreground hover:shadow-brutal-sm"
+                  class="border border-transparent p-1.5 text-muted-foreground transition-all hover:border-border hover:bg-primary hover:text-foreground hover:shadow-brutal-sm"
                   title="Edit"
                   @click="$emit('edit', row)"
                 >
@@ -123,7 +123,7 @@
                 </button>
                 <button
                   v-if="showDelete"
-                  class="border-2 border-transparent p-1.5 text-muted-foreground transition-all hover:border-foreground hover:bg-destructive hover:text-white hover:shadow-brutal-sm"
+                  class="border border-transparent p-1.5 text-muted-foreground transition-all hover:border-border hover:bg-destructive hover:text-white hover:shadow-brutal-sm"
                   title="Hapus"
                   @click="$emit('delete', row)"
                 >
@@ -146,7 +146,7 @@
       <div class="flex items-center gap-1">
         <select
           v-model="currentPageSize"
-          class="border-2 border-foreground bg-surface px-2 py-1 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="border border-border bg-surface px-2 py-1 text-sm font-medium text-foreground shadow-brutal-sm"
           @change="handleSizeChange"
         >
           <option v-for="s in pageSizes" :key="s" :value="s">{{ s }}</option>

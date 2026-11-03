@@ -23,6 +23,17 @@ events consumer alive, ARQ workers beating) or the installer exits
 non-zero — no more "DONE with warnings". Gate/camera checks still happen
 after the setup wizard: `sudo -u parking python scripts/parking_doctor.py`.
 
+## Click-through install (flashdisk)
+
+Copy the whole project to a USB stick, plug it into the target PC, double-click
+`installer/E-Parking-Install.desktop` (or run `./installer/install-gui.sh`).
+Agree -> pick role -> progress window -> the setup wizard opens in Chrome.
+Needs internet until the offline bundle exists. Installs from the stick
+(`PARKING_SOURCE_DIR`), no git/repo URL needed. Log: `/var/log/parking-install.log`.
+
+Unattended / ISO first boot: `install-gui.sh --auto combo`, or install
+`firstboot/eparking-firstboot.service` (reads `/etc/eparking-install.conf`).
+
 ## Roles
 
 | Role     | What it installs                                                                |

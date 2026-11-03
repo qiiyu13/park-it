@@ -10,6 +10,7 @@ Usage:
     python scripts/emoney_diagnostic.py
 """
 
+import os
 import sys
 import time
 
@@ -17,9 +18,15 @@ from protocols.compass.protocol import CompassTransport, cmd_qr5
 from protocols.passti.commands import cmd_check_balance, cmd_init
 from protocols.passti.frame import parse_response
 
-CONTROLLER_IP = "192.168.1.100"
-CONTROLLER_PORT = 5000
-EMONEY_INIT_KEY = bytes.fromhex("758F40D46D95D1641448AA19B9282C05")
+# Site-specific values come from the environment. The controller IP and the
+# reader INIT key are deployment secrets — never commit them to the repo.
+CONTROLLER_IP = os.environ.get("CONTROLLER_IP", "")
+CONTROLLER_PORT = int(os.environ.get("CONTROLLER_PORT", "5000"))
+_key_hex = os.environ.get("EMONEY_INIT_KEY", "")
+try:
+    EMONEY_INIT_KEY: bytes | None = bytes.fromhex(_key_hex) if _key_hex else None
+except ValueError:
+    EMONEY_INIT_KEY = None
 
 
 def hexdump(data: bytes, label: str = ""):
@@ -48,6 +55,13 @@ def main():
     print("╔════════════════════════════════════════════════════════════╗")
     print("║     E-MONEY READER DIAGNOSTIC                              ║")
     print("╚════════════════════════════════════════════════════════════╝")
+
+    if not CONTROLLER_IP:
+        print("❌ Set CONTROLLER_IP (and optionally CONTROLLER_PORT) in the environment.")
+        sys.exit(2)
+    if EMONEY_INIT_KEY is None or len(EMONEY_INIT_KEY) != 16:
+        print("❌ Set EMONEY_INIT_KEY to the reader's 16-byte key (32 hex chars).")
+        sys.exit(2)
 
     transport = CompassTransport(CONTROLLER_IP, CONTROLLER_PORT)
     try:
@@ -96,8 +110,10 @@ def main():
         # Try to extract QT data
         idx = buffer.find(b"\xa6QT")
         if idx != -1:
-            footer = buffer.find(b"\xa9", idx + 3)
-            if footer != -1:
+            # PASSTI payloads can contain 0xA9 bytes; the wrapper's footer is
+            # the LAST terminator in the buffered chunk, not the first.
+            footer = buffer.rfind(b"\xa9")
+            if footer > idx:
                 qt_data = buffer[idx + 3 : footer]
                 print(f"\nExtracted QT data ({len(qt_data)} bytes):")
                 hexdump(qt_data, "QT")
@@ -189,8 +205,8 @@ def main():
     idx = buffer.find(b"\xa6QT")
     if idx != -1:
         print(f"\n[Attempt 1] Found \\xa6QT at offset {idx}")
-        footer = buffer.find(b"\xa9", idx + 3)
-        if footer != -1:
+        footer = buffer.rfind(b"\xa9")
+        if footer > idx:
             qt_data = buffer[idx + 3 : footer]
             print(f"  QT data: {len(qt_data)} bytes")
             hexdump(qt_data)

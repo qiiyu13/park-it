@@ -113,6 +113,28 @@ def build_frame(cmd: int, data: bytes = b"") -> bytes:
     return bytes([STX, lh, ll]) + payload + bytes([chk])
 
 
+def build_response(
+    resp_code: int = 0x00,
+    status: bytes = b"\x00\x00\x00",
+    body: bytes = b"",
+) -> bytes:
+    """Build a PASSTI reader->host response frame.
+
+    Commands and responses share STX/LEN/LRC but NOT the payload layout:
+    a command payload is ``EF 01 CMD DATA`` (3-byte command field), while a
+    response payload is ``RESP_CODE(1) STATUS(3) BODY``. Reusing ``build_frame``
+    for responses shifts every field by three bytes, which is why the old
+    simulator could never produce a response that ``parse_response`` accepted.
+    """
+    if len(status) != 3:
+        raise ValueError("status must be exactly 3 bytes")
+    payload = bytes([resp_code]) + status + body
+    lh = (len(payload) >> 8) & 0xFF
+    ll = len(payload) & 0xFF
+    chk = _lrc(bytes([lh, ll]) + payload)
+    return bytes([STX, lh, ll]) + payload + bytes([chk])
+
+
 def parse_response(raw: bytes) -> dict:
     """Parse a PASSTI response frame.
 

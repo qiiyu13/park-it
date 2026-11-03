@@ -7,35 +7,35 @@
     <!-- Site Info -->
     <div v-if="activeTab === 'site-info'" class="max-w-xl space-y-4">
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">Site Name</label>
+        <label class="text-sm font-bold  tracking-wide text-foreground">Site Name</label>
         <Input v-model="siteConfig.name" placeholder="Parking Mall ABC" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">Address</label>
-        <textarea v-model="siteConfig.address" rows="2" class="w-full border-2 border-foreground bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100" />
+        <label class="text-sm font-bold  tracking-wide text-foreground">Address</label>
+        <textarea v-model="siteConfig.address" rows="2" class="w-full border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">City</label>
+        <label class="text-sm font-bold  tracking-wide text-foreground">City</label>
         <Input v-model="siteConfig.city" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">Phone</label>
+        <label class="text-sm font-bold  tracking-wide text-foreground">Phone</label>
         <Input v-model="siteConfig.phone" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">Email</label>
+        <label class="text-sm font-bold  tracking-wide text-foreground">Email</label>
         <Input v-model="siteConfig.email" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold uppercase tracking-wide text-foreground">Tax ID (NPWP)</label>
+        <label class="text-sm font-bold  tracking-wide text-foreground">Tax ID (NPWP)</label>
         <Input v-model="siteConfig.tax_id" />
       </div>
       <Button @click="saveSiteConfig">Save</Button>
 
-      <div class="border-t-2 border-foreground pt-4">
-        <h3 class="mb-2 text-sm font-black uppercase tracking-wide text-foreground">Receipt Preview</h3>
-        <div class="border-2 border-foreground bg-surface p-4 text-center shadow-brutal">
-          <div class="text-base font-black uppercase text-foreground">{{ siteConfig.name || 'E-Parking' }}</div>
+      <div class="border-t border-border pt-4">
+        <h3 class="mb-2 text-sm font-bold  tracking-wide text-foreground">Receipt Preview</h3>
+        <div class="border border-border bg-surface p-4 text-center shadow-brutal">
+          <div class="text-base font-bold  text-foreground">{{ siteConfig.name || 'E-Parking' }}</div>
           <div class="text-xs font-medium text-muted-foreground">{{ siteConfig.address }}</div>
           <div class="text-xs font-medium text-muted-foreground">{{ siteConfig.city }} | {{ siteConfig.phone }}</div>
         </div>
@@ -44,21 +44,21 @@
 
     <!-- General Settings -->
     <div v-if="activeTab === 'general'">
-      <div class="border-2 border-foreground shadow-brutal">
-        <div class="grid grid-cols-[200px_1fr_250px_120px] gap-px border-b-2 border-foreground bg-foreground text-xs font-black uppercase text-background">
+      <div class="overflow-hidden rounded-lg border border-border bg-surface shadow-brutal-sm">
+        <div class="grid grid-cols-[200px_1fr_250px_120px] gap-px border-b border-border bg-muted/60 text-[11px] font-semibold text-muted-foreground">
           <div class="px-3 py-2">Key</div>
           <div class="px-3 py-2">Label</div>
           <div class="px-3 py-2">Nilai</div>
           <div class="px-3 py-2">Grup</div>
         </div>
-        <div v-for="row in settings" :key="row.key" class="grid grid-cols-[200px_1fr_250px_120px] gap-px border-b-2 border-foreground last:border-0">
-          <div class="px-3 py-2 font-mono text-sm font-bold text-foreground">{{ row.key }}</div>
+        <div v-for="row in settings" :key="row.key" class="grid grid-cols-[200px_1fr_250px_120px] gap-px border-b border-border last:border-0">
+          <div class="px-3 py-2 font-mono text-sm font-medium text-foreground">{{ row.key }}</div>
           <div class="px-3 py-2 text-sm font-medium text-foreground">{{ row.label }}</div>
           <div class="px-3 py-2">
-            <input v-model="row.value" class="w-full border-2 border-foreground bg-background px-2 py-1 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[1px] focus:translate-y-[1px] transition-all duration-100" @blur="saveSetting(row)" >
+            <input v-model="row.value" class="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground transition-colors focus:border-[color:var(--focus-ring)] focus:outline-none focus:ring-2 focus:ring-[color:var(--focus-ring)]/20" @blur="saveSetting(row)" >
           </div>
           <div class="px-3 py-2">
-            <span class="border-2 border-foreground bg-muted px-1.5 py-0.5 text-xs font-bold uppercase text-muted-foreground shadow-brutal-sm">{{ row.group }}</span>
+            <span class="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{{ row.group }}</span>
           </div>
         </div>
       </div>
@@ -84,31 +84,31 @@
       <div class="flex items-center justify-between">
         <p class="text-sm font-medium text-muted-foreground">Konfigurasi jenis lajur untuk setiap gate keluar (POS).</p>
       </div>
-      <div class="border-2 border-foreground overflow-hidden shadow-brutal">
+      <div class="overflow-hidden rounded-lg border border-border bg-surface shadow-brutal-sm">
         <table class="w-full text-sm">
-          <thead class="bg-foreground text-background">
+          <thead class="bg-muted/60 text-muted-foreground">
             <tr>
-              <th class="px-3 py-2 text-left text-xs font-black uppercase">Nama</th>
-              <th class="px-3 py-2 text-left text-xs font-black uppercase w-24">Kode</th>
-              <th class="px-3 py-2 text-left text-xs font-black uppercase w-32">Jenis Lajur</th>
-              <th class="px-3 py-2 text-left text-xs font-black uppercase">Kendaraan Default</th>
+              <th class="px-3 py-2 text-left text-[11px] font-semibold tracking-wider">Nama</th>
+              <th class="px-3 py-2 text-left text-[11px] font-semibold tracking-wider w-24">Kode</th>
+              <th class="px-3 py-2 text-left text-[11px] font-semibold tracking-wider w-32">Jenis Lajur</th>
+              <th class="px-3 py-2 text-left text-[11px] font-semibold tracking-wider">Kendaraan Default</th>
               <th class="px-3 py-2 w-20" />
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loadingGates" class="border-t-2 border-foreground">
+            <tr v-if="loadingGates" class="border-t border-border">
               <td colspan="5" class="px-3 py-4 text-center text-muted-foreground text-xs font-medium">Memuat...</td>
             </tr>
-            <tr v-else-if="gateOutList.length === 0" class="border-t-2 border-foreground">
+            <tr v-else-if="gateOutList.length === 0" class="border-t border-border">
               <td colspan="5" class="px-3 py-4 text-center text-muted-foreground text-xs font-medium">Tidak ada gate keluar</td>
             </tr>
-            <tr v-for="gate in gateOutList" :key="gate.id" class="border-t-2 border-foreground hover:bg-primary/20">
+            <tr v-for="gate in gateOutList" :key="gate.id" class="border-t border-border hover:bg-primary/20">
               <td class="px-3 py-2 font-bold text-foreground">{{ gate.name }}</td>
               <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{{ gate.code }}</td>
               <td class="px-3 py-2">
                 <span
 :class="[
-                  'border-2 border-foreground px-2 py-0.5 text-xs font-bold uppercase shadow-brutal-sm',
+                  'border border-border px-2 py-0.5 text-xs font-bold  shadow-brutal-sm',
                   gate.hardware_config?.lane_type === 'SINGLE' ? 'bg-primary text-foreground' : 'bg-warning text-foreground'
                 ]">
                   {{ gate.hardware_config?.lane_type === 'SINGLE' ? 'Single' : 'Campuran' }}
@@ -118,7 +118,7 @@
                 {{ getVehicleTypeName(gate.hardware_config?.default_vehicle_type_id) || '—' }}
               </td>
               <td class="px-3 py-2 text-right">
-                <button class="border-2 border-foreground bg-primary px-2 py-1 text-xs font-bold uppercase text-foreground shadow-brutal-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all duration-100" @click="openGateLaneModal(gate)">Edit</button>
+                <button class="border border-border bg-primary px-2 py-1 text-xs font-bold  text-foreground shadow-brutal-sm   hover:shadow-none transition-all duration-100" @click="openGateLaneModal(gate)">Edit</button>
               </td>
             </tr>
           </tbody>
@@ -133,7 +133,7 @@
           </DialogHeader>
 
           <div class="space-y-2">
-            <label class="text-sm font-bold uppercase tracking-wide text-foreground">Jenis Lajur</label>
+            <label class="text-sm font-bold  tracking-wide text-foreground">Jenis Lajur</label>
             <div class="flex gap-3">
               <label v-for="opt in laneTypeOptions" :key="opt.value" class="flex items-center gap-2 cursor-pointer">
                 <input v-model="gateLaneForm.lane_type" type="radio" :value="opt.value" class="accent-primary" >
@@ -147,8 +147,8 @@
           </div>
 
           <div v-if="gateLaneForm.lane_type === 'SINGLE'" class="space-y-2">
-            <label class="text-sm font-bold uppercase tracking-wide text-foreground">Jenis Kendaraan Default</label>
-            <select v-model.number="gateLaneForm.default_vehicle_type_id" class="w-full border-2 border-foreground bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100">
+            <label class="text-sm font-bold  tracking-wide text-foreground">Jenis Kendaraan Default</label>
+            <select v-model.number="gateLaneForm.default_vehicle_type_id" class="w-full border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100">
               <option :value="null">— Pilih jenis —</option>
               <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }} ({{ vt.code }})</option>
             </select>

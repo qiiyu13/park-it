@@ -7,7 +7,7 @@ Simulates PASSTI reader frame protocol:
 
 import asyncio
 
-from protocols.passti.frame import build_frame
+from protocols.passti.frame import build_response
 from shared.logging import get_logger
 
 # structlog, not stdlib logging — see the note in controller_sim.py: the call
@@ -23,9 +23,11 @@ class PasstiSimulator:
         self.port = port
         self.server: asyncio.Server | None = None
         self._next_status = "SUCCESS"
-        self._card_type = "02"  # Mandiri eMoney
-        self._mid = "2034567890ABCDE"
-        self._tid = "87654321"
+        self._card_type = 0x02  # Mandiri eMoney
+        # Wire fields are raw bytes; these are their hex representations.
+        self._mid = "02034567890ABCDE"  # 8 bytes
+        self._tid = "87654321"  # 4 bytes
+        self._card_number = "5712017101900004"  # 8 bytes
         self._transaction_counter = 1
         self._command_log: list[bytes] = []
 
@@ -120,34 +122,29 @@ class PasstiSimulator:
             return self._build_error_response(0x01, 0x10, 0x01)
 
     def _build_check_balance_response(self) -> bytes:
-        """Build CheckBalance success response."""
-        # Status + card_type + mid + tid + datetime + card_num + balance + counter
-        status = bytes.fromhex("000000")
-        card_type = bytes.fromhex(self._card_type)
-        mid = self._mid.encode("ascii")
-        tid = self._tid.zfill(8).encode("ascii")
-        dt = bytes.fromhex("260426120000")
-        card_num = bytes.fromhex("1234567890123456")
-        balance = bytes.fromhex("00002710")  # 10000 decimal
-        counter = bytes.fromhex("00000001")
-        data = status + card_type + mid + tid + dt + card_num + balance + counter
-        return build_frame(0x02, data)
+        """Build CheckBalance success response (V1.12 §III.B)."""
+        body = (
+            bytes([self._card_type])
+            + bytes.fromhex(self._card_number)
+            + (10000).to_bytes(4, "big")
+        )
+        return build_response(0x00, b"\x00\x00\x00", body)
 
     def _build_deduct_response(self) -> bytes:
-        """Build Deduct response based on configured status."""
+        """Build Deduct response based on configured status (V1.12 §III.C)."""
         if self._next_status == "SUCCESS":
-            status = bytes.fromhex("000000")
-            card_type = bytes.fromhex(self._card_type)
-            mid = self._mid.encode("ascii")
-            tid = self._tid.zfill(8).encode("ascii")
-            dt = bytes.fromhex("260426120000")
-            card_num = bytes.fromhex("1234567890123456")
-            deduct = bytes.fromhex("00000500")  # 500 decimal
-            balance = bytes.fromhex("00002210")  # 8700 decimal
-            counter = self._transaction_counter.to_bytes(4, "big")
+            body = (
+                bytes([self._card_type])
+                + bytes.fromhex(self._mid)
+                + bytes.fromhex(self._tid)
+                + bytes.fromhex("26042612000000")[:7]  # ddmmyyyyhhmmss BCD
+                + bytes.fromhex(self._card_number)
+                + (500).to_bytes(4, "big")
+                + (8700).to_bytes(4, "big")
+                + self._transaction_counter.to_bytes(4, "big")
+            )
             self._transaction_counter += 1
-            data = status + card_type + mid + tid + dt + card_num + deduct + balance + counter
-            return build_frame(0x03, data)
+            return build_response(0x00, b"\x00\x00\x00", body)
         elif self._next_status == "LOST_CONTACT":
             return self._build_error_response(0x01, 0x10, 0x05)
         elif self._next_status == "INSUFFICIENT_BALANCE":
@@ -159,24 +156,22 @@ class PasstiSimulator:
 
     def _build_cancel_response(self) -> bytes:
         """Build CancelDeduct success response."""
-        data = bytes.fromhex("000000")
-        return build_frame(0x04, data)
+        return build_response(0x00, b"\x00\x00\x00")
 
     def _build_init_response(self) -> bytes:
-        """Build INIT success response."""
-        data = bytes.fromhex("000000")
-        return build_frame(0x01, data)
+        """Build INIT success response: status + MID(8) + TID(4)."""
+        body = bytes.fromhex(self._mid) + bytes.fromhex(self._tid)
+        return build_response(0x00, b"\x00\x00\x00", body)
 
     def _build_error_response(self, b1: int, b2: int, b3: int) -> bytes:
-        """Build error response frame."""
-        data = bytes([b1, b2, b3])
-        return build_frame(0x03, data)
+        """Build a status-error response frame (resp_code 0x00)."""
+        return build_response(0x00, bytes([b1, b2, b3]))
 
     # Configuration
     def set_next_status(self, status: str) -> None:
         self._next_status = status
 
-    def set_card_type(self, card_type: str) -> None:
+    def set_card_type(self, card_type: int) -> None:
         self._card_type = card_type
 
     def get_command_log(self) -> list[bytes]:

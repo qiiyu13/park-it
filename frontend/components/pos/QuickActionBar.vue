@@ -2,32 +2,31 @@
   <div class="flex items-center justify-between w-full">
     <!-- Left: Keyboard shortcuts (always visible) -->
     <div class="flex items-center gap-4">
-      <span v-if="gateName || shiftName" class="text-base font-medium text-foreground">
-        <span v-if="gateName" class="font-black text-foreground">{{ gateName }}</span>
-        <span v-if="gateName && shiftName" class="mx-2 text-foreground/40">|</span>
-        <span v-if="shiftName">{{ shiftName }}</span>
-        <span class="mx-2 text-foreground/40">|</span>
+      <span v-if="gateName || shiftName" class="flex items-center gap-2 text-sm">
+        <span v-if="gateName" class="font-semibold text-foreground">{{ gateName }}</span>
+        <span v-if="gateName && shiftName" class="text-border">/</span>
+        <span v-if="shiftName" class="text-muted-foreground">{{ shiftName }}</span>
       </span>
-      <span v-if="isMixedLane && activeVehicleTypeName" class="flex items-center gap-2 mr-2">
-        <span class="border-2 border-foreground bg-primary px-3 py-1 text-base font-black uppercase text-foreground shadow-brutal-sm">{{ activeVehicleTypeName }}</span>
+      <span v-if="isMixedLane && activeVehicleTypeName" class="mr-2 flex items-center gap-2">
+        <span class="rounded-md border border-primary/30 bg-primary/15 px-2.5 py-1 text-xs font-semibold text-foreground">{{ activeVehicleTypeName }}</span>
       </span>
       <div
         v-for="shortcut in shortcuts"
         :key="shortcut.key"
         class="flex items-center gap-2"
-        :class="shortcut.active ? 'opacity-100' : 'opacity-30'"
+        :class="shortcut.active ? 'opacity-100' : 'opacity-40'"
       >
         <kbd
           :class="[
-            'inline-flex h-9 min-w-[2.5rem] items-center justify-center border-2 px-2 font-mono text-sm font-bold',
+            'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-1.5 font-mono text-xs font-semibold',
             shortcut.active
-              ? 'border-foreground bg-surface text-foreground shadow-brutal-sm'
-              : 'border-foreground/30 bg-surface/50 text-muted-foreground',
+              ? 'border-primary/40 bg-primary/10 text-foreground'
+              : 'border-border bg-surface text-muted-foreground',
           ]"
         >
           {{ shortcut.key }}
         </kbd>
-        <span class="text-base font-medium text-foreground">{{ shortcut.label }}</span>
+        <span :class="['text-xs font-medium', shortcut.active ? 'text-foreground' : 'text-muted-foreground']">{{ shortcut.label }}</span>
       </div>
     </div>
 

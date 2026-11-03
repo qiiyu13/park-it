@@ -172,12 +172,30 @@ async def main() -> None:
     except OSError as e:
         logger.error("outbox_init_failed_results_will_not_be_durable", error=str(e), dir=outbox_dir)
 
+    # Optional PASSTI INIT key (32 hex chars = 16 bytes). Kept in booth.json
+    # (0600) because it is site-specific; without it, INIT is skipped.
+    emoney_init_key: bytes | None = None
+    init_key_hex = (
+        (config.get("peripherals", {}).get("emoney_reader", {}) or {}).get("init_key")
+        or ""
+    ).strip()
+    if init_key_hex:
+        try:
+            parsed_key = bytes.fromhex(init_key_hex)
+            if len(parsed_key) == 16:
+                emoney_init_key = parsed_key
+            else:
+                logger.error("emoney_init_key_invalid_length", expected_bytes=16)
+        except ValueError:
+            logger.error("emoney_init_key_invalid_hex")
+
     ws_server = WebSocketServer(
         serial_manager,
         port=args.port,
         api_config=api_config,
         gate_opener=gate_opener,
         outbox=outbox,
+        emoney_init_key=emoney_init_key,
     )
     ws_server_ref[0] = ws_server
     await ws_server.start()
@@ -202,14 +220,14 @@ async def main() -> None:
                     )
                 elif 400 <= status < 500:
                     # Deterministic rejection: keep for manual inspection but
-                    # stop hammering — skip the rest this tick too? No: other
-                    # entries may be fine, so just drop this one from the loop.
+                    # stop retrying it every 30s. Other entries still drain.
                     logger.error(
                         "outbox_drain_rejected",
                         status=status,
                         body=body[:300],
                         transaction_id=payload.get("transaction_id"),
                     )
+                    outbox.quarantine(payload)
                 else:
                     break  # 5xx — server unhealthy, retry next tick
 

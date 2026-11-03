@@ -25,15 +25,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common.sh"
 
 NON_INTERACTIVE=false
+QUICK=false
 GATE_CODE_FLAG=""
+EMONEY_INIT_KEY_HEX="${EMONEY_INIT_KEY:-}"
 for arg in "$@"; do
     case "$arg" in
         --non-interactive) NON_INTERACTIVE=true ;;
+        --quick) QUICK=true; NON_INTERACTIVE=true ;;
         --gate-code=*) GATE_CODE_FLAG="${arg#*=}" ;;
+        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${arg#*=}" ;;
         -h|--help) sed -n '6,20p' "$0"; exit 0 ;;
         *) error "unknown arg: $arg"; exit 2 ;;
     esac
 done
+
+# Quick combo: default local lane is the first exit gate provisioned by the
+# server quick preset (1 IN + 1 OUT).
+if $QUICK && [[ -z "$GATE_CODE_FLAG" ]]; then
+    GATE_CODE_FLAG="GOUT-01"
+fi
 
 # ── 0. Preflight ────────────────────────────────────────────────────────────────
 step "0/2 — Preflight Checks"
@@ -62,12 +72,11 @@ if [[ ! -f "$SERVER_SETUP" ]]; then
     exit 1
 fi
 
-# Pass through (e.g. --non-interactive) so both halves behave identically.
-if $NON_INTERACTIVE; then
-    bash "$SERVER_SETUP" --non-interactive
-else
-    bash "$SERVER_SETUP"
-fi
+# Pass through (e.g. --non-interactive/--quick) so both halves behave identically.
+SERVER_ARGS=()
+$NON_INTERACTIVE && SERVER_ARGS+=(--non-interactive)
+$QUICK && SERVER_ARGS+=(--quick)
+bash "$SERVER_SETUP" "${SERVER_ARGS[@]}"
 ok "Server installation complete"
 
 # ── 2. Run local booth installer ────────────────────────────────────────────────
@@ -116,7 +125,18 @@ validate_code "Gate code" "$GATE_CODE"
 step "Detecting serial devices"
 DETECT="/opt/parking-system-v2/scripts/detect-serial-devices.sh"
 if [[ -f "$DETECT" ]]; then
-    bash "$DETECT" || warn "Detection exited non-zero — falling back to manual paths where symlinks are missing."
+    if $NON_INTERACTIVE; then
+        CANDIDATES=$(bash "$DETECT" --json 2>/dev/null || echo '{"candidates":[]}')
+        ASSIGNMENTS=$(printf '%s' "$CANDIDATES" | python3 -c 'import sys,json; [print(c.get("suggested_role","")+"|"+c.get("port","")) for c in json.load(sys.stdin).get("candidates",[]) if c.get("suggested_role")]' 2>/dev/null || true)
+        while IFS='|' read -r role port; do
+            [[ -z "$role" || -z "$port" ]] && continue
+            bash "$DETECT" --write-udev "$role" "$port" >/dev/null 2>&1 \
+                && ok "Stable symlink /dev/parking-${role} → ${port}" \
+                || warn "Could not create /dev/parking-${role} for ${port} — using manual path."
+        done <<< "$ASSIGNMENTS"
+    else
+        bash "$DETECT" || warn "Detection exited non-zero — falling back to manual paths where symlinks are missing."
+    fi
 else
     warn "detect-serial-devices.sh not found — using manual device paths."
 fi
@@ -213,7 +233,8 @@ cat > /etc/parking/booth.json <<EOF
     "emoney_reader": {
       "enabled": true,
       "device": "${EMONEY_DEV}",
-      "baudrate": ${EMONEY_BAUD}
+      "baudrate": ${EMONEY_BAUD},
+      "init_key": "${EMONEY_INIT_KEY_HEX}"
     },
     "receipt_printer": {
       "enabled": true,
@@ -235,12 +256,35 @@ EOF
 chown parking:parking /etc/parking/booth.json
 ok "Booth config written"
 
-# Write install notes for technician reference
+# Self-register the POS row (idempotent) so heartbeat works immediately.
+info "Registering booth '${BOOTH_CODE}' with the local server..."
+REGISTER_BODY=$(printf '{"booth_code":"%s","name":"%s","ip_address":"%s","default_gate_code":"%s"}' \
+    "$BOOTH_CODE" "$BOOTH_NAME" "$SERVER_IP" "$GATE_CODE")
+if REGISTER_JSON=$(curl -fsS -X POST "http://localhost/api/pos/register" \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: ${INTERNAL_API_KEY}" \
+    -d "$REGISTER_BODY" 2>/dev/null); then
+    ok "Booth registered with the server"
+    REGISTERED_GATE=$(python3 -c 'import sys,json; print(json.load(sys.stdin).get("default_gate_id") or "")' <<<"$REGISTER_JSON" 2>/dev/null || true)
+    [[ -z "$REGISTERED_GATE" ]] && warn "Gate '${GATE_CODE}' not found on server — assign it in Device → POS."
+else
+    warn "Booth self-registration failed — add the POS row manually in the admin UI."
+fi
+
+# Write install notes for technician reference. On a combo install the server
+# quick-provision step already wrote admin credentials here — append, never
+# overwrite them.
 NOTES_FILE="/etc/parking/install-notes.txt"
-cat > "$NOTES_FILE" <<EOF
+if [[ -f "$NOTES_FILE" ]]; then
+    printf '\n\n══ Booth configuration ══\n' >> "$NOTES_FILE"
+else
+    cat > "$NOTES_FILE" <<EOF
 E-Parking v2 — Installation Notes
 Generated: $(date)
 ════════════════════════════════════════
+EOF
+fi
+cat >> "$NOTES_FILE" <<EOF
 
 BOOTH: ${BOOTH_NAME} (${BOOTH_CODE})
   Default gate : ${GATE_CODE}

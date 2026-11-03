@@ -11,7 +11,7 @@ from protocols.passti.commands import cmd_check_balance, cmd_init
 from protocols.passti.frame import CMD_GET_READER_INFO, build_frame, parse_response
 
 
-def diagnose_passti(serial_port: str, baudrate: int = 9600, init_key: str = "") -> dict:
+def diagnose_passti(serial_port: str, baudrate: int = 38400, init_key: str = "") -> dict:
     """Run PASSTI reader diagnostic.
 
     Returns dict with:
@@ -34,16 +34,32 @@ def diagnose_passti(serial_port: str, baudrate: int = 9600, init_key: str = "") 
         ser = serial.Serial(serial_port, baudrate, timeout=2)
         results["serial_open"] = {"status": "ok"}
 
-        # Send INIT
-        init_frame = cmd_init(init_key) if init_key else cmd_init("0" * 32)
-        ser.write(init_frame)
-        response = ser.read(64)
-        parsed = parse_response(response)
-        results["init"] = {
-            "status": "ok" if parsed.get("ok") else "failed",
-            "raw_hex": response.hex(),
-            "parsed": parsed,
-        }
+        # Send INIT — the protocol key is 16 raw bytes, not a 32-char string.
+        if not init_key:
+            results["init"] = {
+                "status": "skipped",
+                "error": "pass --init-key <32 hex chars>",
+            }
+        else:
+            try:
+                key = bytes.fromhex(init_key)
+            except ValueError:
+                key = b""
+            if len(key) != 16:
+                results["init"] = {
+                    "status": "error",
+                    "error": "init key must be 16 bytes (32 hex characters)",
+                }
+            else:
+                init_frame = cmd_init(key)
+                ser.write(init_frame)
+                response = ser.read(64)
+                parsed = parse_response(response)
+                results["init"] = {
+                    "status": "ok" if parsed.get("ok") else "failed",
+                    "raw_hex": response.hex(),
+                    "parsed": parsed,
+                }
 
         # Get Reader Info
         info_frame = build_frame(CMD_GET_READER_INFO)
@@ -80,7 +96,7 @@ def diagnose_passti(serial_port: str, baudrate: int = 9600, init_key: str = "") 
 def main():
     parser = argparse.ArgumentParser(description="PASSTI Reader Diagnostic")
     parser.add_argument("port", help="Serial port (e.g., /dev/ttyUSB0)")
-    parser.add_argument("--baudrate", type=int, default=9600)
+    parser.add_argument("--baudrate", type=int, default=38400)
     parser.add_argument("--init-key", default="", help="16-byte init key (hex)")
     args = parser.parse_args()
 

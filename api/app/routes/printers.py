@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.app.middleware.auth import require_admin, require_auth
 from api.app.models.printer import Printer
 from api.database import get_db
 from shared.config import get_settings
@@ -107,6 +108,7 @@ def _to_response(p: Printer) -> PrinterResponse:
 async def list_printers(
     gate_id: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth),
 ):
     """List all printers, optionally filtered by gate_id."""
     query = select(Printer).order_by(Printer.gate_id, Printer.name)
@@ -122,6 +124,7 @@ async def list_printers(
 async def create_printer(
     req: PrinterCreateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Create a new printer."""
     printer = Printer(
@@ -148,6 +151,7 @@ async def create_printer(
 async def get_printer(
     printer_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Get a single printer by ID."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -162,6 +166,7 @@ async def update_printer(
     printer_id: int,
     req: PrinterUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Update printer configuration."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -183,6 +188,7 @@ async def update_printer(
 async def delete_printer(
     printer_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Delete a printer."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -205,6 +211,7 @@ async def refill_paper(
     printer_id: int,
     req: PaperRefillRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Record a paper refill.  Resets paper_remaining to given count or capacity."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -231,6 +238,7 @@ async def refill_paper(
 async def decrement_paper(
     printer_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
 ):
     """Decrement paper counter by 1.  Called by print_worker after successful print."""
     settings = get_settings()
@@ -263,6 +271,7 @@ async def decrement_paper(
 @router.get("/status/summary")
 async def printer_status_summary(
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth),
 ):
     """Dashboard summary of all printer paper statuses."""
     result = await db.execute(

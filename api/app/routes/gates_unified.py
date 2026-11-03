@@ -2,16 +2,19 @@
 
 from datetime import UTC
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.api_key import require_api_key
 from api.app.middleware.auth import require_admin, require_auth, require_operator
 from api.app.models.gate import Gate
+from api.app.models.manual_open_log import ManualOpenLog
+from api.app.models.user import User
 from api.app.schemas.common import SuccessResponse
 from api.app.schemas.gate import GateCreate, GateLaneConfigUpdate, GateResponse, GateUpdate
 from api.app.schemas.gate_control import GateControlRequest, GateControlResponse
+from api.app.services.audit import log_action
 from api.app.services.gate_command import publish_command
 from api.database import get_db
 from shared.events import CloseGateCommand, OpenGateCommand
@@ -146,10 +149,11 @@ async def delete_gate(
 async def open_gate(
     gate_id: int,
     req: GateControlRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_operator),
 ) -> GateControlResponse:
-    """Manually open a gate. Operator triggered."""
+    """Manually open a gate. Operator triggered; every open is audited."""
     gate = await db.get(Gate, gate_id)
     if gate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
@@ -158,6 +162,35 @@ async def open_gate(
 
     cmd = OpenGateCommand(gate_id=gate.code, reason=req.reason)
     msg_id = await publish_command(cmd)
+
+    try:
+        user_id = int(current_user["sub"])
+    except (KeyError, TypeError, ValueError):
+        user_id = None
+    # opened_by is an FK to users; a token can outlive a deleted account.
+    if user_id is not None and await db.get(User, user_id) is not None:
+        db.add(
+            ManualOpenLog(
+                gate_id=gate.id,
+                gate_type=gate.direction.lower(),
+                opened_by=user_id,
+                reason=req.reason[:100],
+            )
+        )
+    if user_id is not None:
+        await log_action(
+            db,
+            action="GATE_OPEN",
+            user_id=user_id,
+            username=current_user.get("username"),
+            entity_type="Gate",
+            entity_id=str(gate.id),
+            details={"gate_code": gate.code, "reason": req.reason},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await db.commit()
+
     logger.info("gate_open_commanded", gate_id=gate.code, reason=req.reason)
     return GateControlResponse(success=True, message="Gate open command sent", gate_id=gate.code, command_id=msg_id)
 
@@ -166,6 +199,7 @@ async def open_gate(
 async def close_gate(
     gate_id: int,
     req: GateControlRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_operator),
 ) -> GateControlResponse:
@@ -180,12 +214,32 @@ async def close_gate(
 
     cmd = CloseGateCommand(gate_id=gate.code, reason=req.reason)
     msg_id = await publish_command(cmd)
+    try:
+        user_id = int(current_user["sub"])
+    except (KeyError, TypeError, ValueError):
+        user_id = None
+    if user_id is not None:
+        await log_action(
+            db,
+            action="GATE_CLOSE",
+            user_id=user_id,
+            username=current_user.get("username"),
+            entity_type="Gate",
+            entity_id=str(gate.id),
+            details={"gate_code": gate.code, "reason": req.reason},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await db.commit()
     logger.info("gate_close_commanded", gate_id=gate.code, reason=req.reason)
     return GateControlResponse(success=True, message="Gate close command sent", gate_id=gate.code, command_id=msg_id)
 
 
 @router.get("/status/heartbeat")
-async def gates_heartbeat_status(db: AsyncSession = Depends(get_db)) -> dict:
+async def gates_heartbeat_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth),
+) -> dict:
     """Return liveness map for all active gates.
 
     Two liveness sources, branched by direction:

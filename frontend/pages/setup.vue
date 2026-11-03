@@ -155,7 +155,7 @@
 
       <div class="rounded-lg border border-border bg-background overflow-hidden">
         <table class="w-full text-sm">
-          <thead class="bg-surface-hover text-xs uppercase text-muted-foreground">
+          <thead class="bg-surface-hover text-xs  text-muted-foreground">
             <tr>
               <th class="px-3 py-2 text-left">Nama</th>
               <th class="px-3 py-2 text-left">Kode</th>
@@ -201,7 +201,7 @@
 
       <div class="rounded-lg border border-border bg-background overflow-hidden">
         <table class="w-full text-sm">
-          <thead class="bg-surface-hover text-xs uppercase text-muted-foreground">
+          <thead class="bg-surface-hover text-xs  text-muted-foreground">
             <tr>
               <th class="px-3 py-2 text-left">Nama area</th>
               <th class="px-3 py-2 text-left">Kode</th>
@@ -673,10 +673,25 @@ async function redeemManualToken(token) {
       body: JSON.stringify({ token }),
     })
     sessionActive.value = true
+    await activateAdminSession()
   } catch (err) {
     tokenError.value = err.message
   } finally {
     tokenLoading.value = false
+  }
+}
+
+// Resuming a wizard on a site that already has an admin: the setup session
+// can't create another admin, and the config endpoints need the admin role,
+// so exchange the token-backed session for a real admin cookie.
+async function activateAdminSession() {
+  // DEV_ADMIN has id=0 and no real cookie; only a persisted user counts.
+  if (!state.has_admin || (authStore.user && authStore.user.id)) return
+  try {
+    await fetchApi('/api/setup/admin-session', { method: 'POST' })
+    await authStore.fetchUser()
+  } catch (err) {
+    console.warn('setup_admin_session_failed', err)
   }
 }
 
@@ -980,6 +995,7 @@ onMounted(async () => {
     return
   }
   await redeemAutoToken()
+  await activateAdminSession()
   if (state.has_admin) {
     // Skip admin creation step when an admin already exists.
     currentIndex.value = 1

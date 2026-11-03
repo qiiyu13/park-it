@@ -226,6 +226,15 @@ async def _generate_locked(ctx, db=None) -> dict:
 
                 files_generated += 1
                 total_transactions += len(chunk)
+                # Cross-process metric bridge: the API's /metrics scrape
+                # replays this Redis counter (counter objects are per-process,
+                # so incrementing the API's Counter here would be invisible).
+                try:
+                    if redis is not None:
+                        await redis.incr("metrics:settlement_files_generated")
+                except Exception:
+                    # Metrics must never fail an actual settlement.
+                    pass
 
                 logger.info(
                     "generate_settlement_file_created",

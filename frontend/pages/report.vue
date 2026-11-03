@@ -3,7 +3,7 @@
     <PageHeader title="Laporan" subtitle="Ringkasan transaksi dan settlement e-money." />
 
     <!-- Date filter -->
-    <div class="mb-4 border-2 border-foreground bg-surface p-4 shadow-brutal">
+    <div class="mb-4 border border-border bg-surface p-4 shadow-brutal">
       <div class="mb-3 flex gap-2">
         <Button size="sm" variant="outline" @click="setToday">Hari Ini</Button>
         <Button size="sm" variant="outline" @click="setThisWeek">Minggu Ini</Button>
@@ -11,9 +11,9 @@
         <Button size="sm" variant="outline" @click="setLastMonth">Bulan Lalu</Button>
       </div>
       <div class="flex items-center gap-3">
-        <input v-model="dateFrom" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
+        <input v-model="dateFrom" type="date" class="border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
         <span class="font-bold text-foreground">s/d</span>
-        <input v-model="dateTo" type="date" class="border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
+        <input v-model="dateTo" type="date" class="border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
         <Button size="sm" :disabled="loading" @click="loadReports">Tampilkan</Button>
       </div>
     </div>
@@ -44,13 +44,13 @@
     <div v-if="activeTab === 'shift'">
       <!-- Summary strip -->
       <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div class="border-2 border-foreground bg-surface p-3 shadow-brutal">
-          <p class="text-xs font-bold uppercase text-muted-foreground">Total Transaksi</p>
-          <p class="text-xl font-black text-foreground">{{ (shiftReport?.total_transactions ?? 0).toLocaleString('id-ID') }}</p>
+        <div class="border border-border bg-surface p-3 shadow-brutal">
+          <p class="text-xs font-bold  text-muted-foreground">Total Transaksi</p>
+          <p class="text-xl font-bold text-foreground">{{ (shiftReport?.total_transactions ?? 0).toLocaleString('id-ID') }}</p>
         </div>
-        <div class="border-2 border-foreground bg-surface p-3 shadow-brutal">
-          <p class="text-xs font-bold uppercase text-muted-foreground">Total Pendapatan</p>
-          <p class="text-xl font-black text-foreground">Rp {{ (shiftReport?.total_revenue ?? 0).toLocaleString('id-ID') }}</p>
+        <div class="border border-border bg-surface p-3 shadow-brutal">
+          <p class="text-xs font-bold  text-muted-foreground">Total Pendapatan</p>
+          <p class="text-xl font-bold text-foreground">Rp {{ (shiftReport?.total_revenue ?? 0).toLocaleString('id-ID') }}</p>
         </div>
       </div>
       <DataTable
@@ -171,9 +171,9 @@ const StatCard = {
     variant: { type: String, default: '' },
   },
   template: `
-    <div class="border-2 border-foreground bg-surface p-4 text-center shadow-brutal">
-      <div class="mb-1 text-xs font-bold uppercase text-muted-foreground">{{ label }}</div>
-      <div :class="['text-xl font-black font-mono', variantClass]">{{ value }}</div>
+    <div class="border border-border bg-surface p-4 text-center shadow-brutal">
+      <div class="mb-1 text-xs font-bold  text-muted-foreground">{{ label }}</div>
+      <div :class="['text-xl font-bold font-mono', variantClass]">{{ value }}</div>
     </div>
   `,
   computed: {

@@ -7,8 +7,9 @@
 # Usage:
 #   sudo ./setup.sh                  # interactive role prompt
 #   sudo ./setup.sh --role server    # full server stack (DB+API+frontend+nginx)
-#   sudo ./setup.sh --role booth     # booth PC only (Chrome kiosk + booth_bridge)
-#   sudo ./setup.sh --role combo     # server + on-box booth (single-PC site)
+#   sudo ./setup.sh --role server --quick   # one-command technician install
+#   sudo ./setup.sh --role booth --quick --server-ip IP --token CODE
+#   sudo ./setup.sh --role combo --quick    # server + on-box booth
 
 set -euo pipefail
 

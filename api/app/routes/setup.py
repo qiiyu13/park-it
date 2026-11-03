@@ -74,6 +74,7 @@ from api.app.services.setup import (
 from api.app.services.setup import (
     setup_complete as setup_complete_q,
 )
+from api.app.utils.auth_cookies import set_auth_cookies
 from api.app.utils.password import hash_password
 from api.database import get_db
 from shared.config import get_settings
@@ -198,7 +199,9 @@ async def enroll_booth(
             status_code=status.HTTP_410_GONE,
             detail="Enrollment token not present — regenerate with scripts/regen-enroll-token.sh.",
         )
-    if not constant_time_eq(disk_token, body.token):
+    # Codes are printed uppercase (and may be typed lowercase). Case-fold both
+    # sides; entropy is unchanged and the route is rate-limited.
+    if not constant_time_eq(disk_token.upper(), body.token.strip().upper()):
         client = request.client.host if request.client else "unknown"
         logger.warning("enroll_token_mismatch", source_ip=client)
         raise HTTPException(
@@ -274,26 +277,55 @@ async def create_admin(
     await db.refresh(user)
 
     tokens = await create_tokens(user)
-    is_secure = get_settings().app_env == "production"
-    response.set_cookie(
-        key="access_token",
-        value=tokens["access_token"],
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        max_age=1800,
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=tokens["refresh_token"],
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        max_age=604800,
-    )
+    set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"])
 
     logger.info("setup_admin_created", user_id=user.id)
     return UserResponse.model_validate(user)
+
+
+@router.post("/admin-session", response_model=UserResponse)
+async def setup_admin_session(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Issue an admin JWT to a valid setup session.
+
+    Needed when the wizard is resumed on a site that already has an admin but
+    the browser does not hold an auth cookie. Existing config endpoints
+    (site-config, vehicle-types, areas, gates) require the admin role, and
+    ``create-admin`` refuses when an admin exists, so without this hand-off a
+    token-only session could redeem but not finish configuration.
+
+    The installer's one-time setup token is already root-equivalent for this
+    host: possessing it permits creating a brand-new admin. Re-entering with
+    a *fresh* token (post-setup) is an explicit installer action.
+    """
+    cookie = request.cookies.get(SETUP_COOKIE_NAME)
+    session = await get_session_by_token(db, cookie) if cookie else None
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Setup session required",
+        )
+
+    result = await db.execute(
+        select(User)
+        .where(User.role == "admin", User.is_active.is_(True))
+        .order_by(User.id)
+        .limit(1)
+    )
+    admin = result.scalar_one_or_none()
+    if admin is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No admin exists yet — create one first",
+        )
+
+    tokens = await create_tokens(admin)
+    set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"])
+    logger.info("setup_admin_session_issued", user_id=admin.id)
+    return UserResponse.model_validate(admin)
 
 
 @router.get("/preflight", response_model=PreflightResponse)

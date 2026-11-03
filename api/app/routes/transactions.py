@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.app.middleware.auth import require_operator
 from api.app.models.parking_transaction import ParkingTransaction
@@ -45,7 +46,20 @@ async def list_transactions(
     Returns a real total count so the frontend grid can render accurate
     pagination (page X of Y) instead of guessing from the result length.
     """
-    stmt = select(ParkingTransaction).order_by(ParkingTransaction.entry_time.desc())
+    # The response schema dereferences these relations; the model defaults to
+    # lazy="noload" (to protect non-list call sites), so eager-load them here
+    # in batched SELECTs instead of returning null display columns.
+    stmt = (
+        select(ParkingTransaction)
+        .options(
+            selectinload(ParkingTransaction.vehicle_type),
+            selectinload(ParkingTransaction.gate_in),
+            selectinload(ParkingTransaction.gate_out),
+            selectinload(ParkingTransaction.shift),
+            selectinload(ParkingTransaction.operator),
+        )
+        .order_by(ParkingTransaction.entry_time.desc())
+    )
 
     if pagination.q:
         stmt = stmt.where(
@@ -96,7 +110,18 @@ async def get_transaction(
     """Get transaction by ID."""
     from fastapi import HTTPException, status
 
-    tx = await db.get(ParkingTransaction, tx_id)
+    result = await db.execute(
+        select(ParkingTransaction)
+        .options(
+            selectinload(ParkingTransaction.vehicle_type),
+            selectinload(ParkingTransaction.gate_in),
+            selectinload(ParkingTransaction.gate_out),
+            selectinload(ParkingTransaction.shift),
+            selectinload(ParkingTransaction.operator),
+        )
+        .where(ParkingTransaction.id == tx_id)
+    )
+    tx = result.scalar_one_or_none()
     if tx is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
     return TransactionListItem.model_validate(tx)

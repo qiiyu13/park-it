@@ -15,11 +15,13 @@ set -euo pipefail
 #
 #   --non-interactive      No prompts (requires --server-ip and --token for
 #                          the configure phase; other values use defaults).
+#   --quick                One command: non-interactive + auto serial setup.
 #   --server-ip=IP         Server address (non-interactive configure).
-#   --token=ENROLL_TOKEN   Enrollment token from the server installer.
-#   --gate-code=GOUT-01    Default gate (optional).
+#   --token=ENROLL_TOKEN   Enrollment code from the server installer.
+#   --gate-code=GOUT-01    Default gate (optional; quick defaults to GOUT-01).
 #
 # Usage:
+#   sudo ./setup.sh --quick --server-ip 192.168.1.10 --token ABCDEF123456
 #   sudo ./setup.sh                  # install + configure
 #   sudo ./setup.sh --install-only   # workshop
 #   sudo ./setup.sh --configure-only # on-site
@@ -35,25 +37,35 @@ source "$SCRIPT_DIR/../common.sh"
 DO_INSTALL=true
 DO_CONFIGURE=true
 NON_INTERACTIVE=false
+QUICK=false
 NI_SERVER_IP=""
 NI_TOKEN=""
 NI_GATE_CODE=""
 NI_BOOTH_CODE="BOOTH"
 NI_BOOTH_NAME="Booth"
+EMONEY_INIT_KEY_HEX="${EMONEY_INIT_KEY:-}"
 for arg in "$@"; do
     case "$arg" in
         --install-only)   DO_CONFIGURE=false ;;
         --configure-only) DO_INSTALL=false ;;
         --non-interactive) NON_INTERACTIVE=true ;;
+        --quick)          QUICK=true; NON_INTERACTIVE=true ;;
         --server-ip=*)    NI_SERVER_IP="${arg#*=}" ;;
         --token=*)        NI_TOKEN="${arg#*=}" ;;
         --gate-code=*)    NI_GATE_CODE="${arg#*=}" ;;
         --booth-code=*)   NI_BOOTH_CODE="${arg#*=}" ;;
         --booth-name=*)   NI_BOOTH_NAME="${arg#*=}" ;;
+        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${arg#*=}" ;;
         -h|--help)        sed -n '4,24p' "$0"; exit 0 ;;
         *) error "unknown arg: $arg"; exit 2 ;;
     esac
 done
+
+# Quick mode: one command, defaults for everything except the server address,
+# enrollment code and (optionally) gate code.
+if $QUICK && [[ -z "$NI_GATE_CODE" ]]; then
+    NI_GATE_CODE="GOUT-01"
+fi
 
 # ── 0. Preflight checks ───────────────────────────────────────────────────────
 step "Preflight Checks"
@@ -77,11 +89,13 @@ fi
 phase_install() {
     step "Install 1/4 — System Packages"
 
-    if ! $NON_INTERACTIVE; then
+    # PARKING_SOURCE_DIR (set by installer/install-gui.sh): install from the
+    # flashdisk copy instead of cloning, so no repo URL is needed.
+    if ! $NON_INTERACTIVE && [[ -z "${PARKING_SOURCE_DIR:-}" ]]; then
         read -rp "Git repository URL [${REPO_URL}]: " INPUT_REPO
         REPO_URL=${INPUT_REPO:-$REPO_URL}
     fi
-    if [[ "$REPO_URL" == *your-org* ]]; then
+    if [[ -z "${PARKING_SOURCE_DIR:-}" && "$REPO_URL" == *your-org* ]]; then
         error "REPO_URL is still the placeholder (your-org). Enter the real repository URL."
         exit 1
     fi
@@ -101,7 +115,7 @@ phase_install() {
 
     apt-get install -y -qq \
         python3.12 python3.12-venv python3.12-dev python3-pip \
-        curl wget git unzip
+        curl wget git unzip rsync
 
     if ! command -v google-chrome &>/dev/null; then
         wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O /tmp/chrome.deb
@@ -147,6 +161,13 @@ EOF
             sudo -u parking git pull --ff-only origin "$current_branch" \
                 || warn "git pull failed (diverged/local changes) — continuing with existing checkout."
         fi
+    elif [[ -n "${PARKING_SOURCE_DIR:-}" ]]; then
+        # ponytail: plain copy, no updates via git. Re-run from a newer stick to upgrade.
+        mkdir -p "$PROJECT_ROOT"
+        rsync -a --exclude=.git --exclude=node_modules --exclude=.venv --exclude=.nuxt \
+            --exclude=.output --exclude=graphify-out --exclude=__pycache__ \
+            "${PARKING_SOURCE_DIR}/" "$PROJECT_ROOT/"
+        chown -R parking:parking "$PROJECT_ROOT"
     else
         rm -rf "$PROJECT_ROOT"
         git clone "$REPO_URL" "$PROJECT_ROOT"
@@ -208,6 +229,9 @@ phase_configure() {
         error "Enrollment token is required — get it from the server install summary or run scripts/regen-enroll-token.sh on the server."
         exit 1
     fi
+
+    # Codes are generated uppercase; accept lowercase typing too.
+    ENROLL_TOKEN=$(printf '%s' "$ENROLL_TOKEN" | tr 'a-z' 'A-Z')
 
     ENROLL_URL="http://${SERVER_IP}/api/setup/enroll"
     info "Enrolling with ${ENROLL_URL} ..."
@@ -271,7 +295,22 @@ phase_configure() {
     step "Configure 1b/4 — Serial Device Detection"
     DETECT="$PROJECT_ROOT/scripts/detect-serial-devices.sh"
     if [[ -x "$DETECT" ]] || [[ -f "$DETECT" ]]; then
-        bash "$DETECT" || warn "Detection exited non-zero — falling back to manual paths where symlinks are missing."
+        if $NON_INTERACTIVE; then
+            # Auto-apply the chipset-based suggestions (no prompts). Unknown
+            # devices are left alone; resolve_dev falls back for those.
+            CANDIDATES=$(bash "$DETECT" --json 2>/dev/null || echo '{"candidates":[]}')
+            ASSIGNMENTS=$(printf '%s' "$CANDIDATES" | python3 -c 'import sys,json; [print(c.get("suggested_role","")+"|"+c.get("port","")) for c in json.load(sys.stdin).get("candidates",[]) if c.get("suggested_role")]' 2>/dev/null || true)
+            while IFS='|' read -r role port; do
+                [[ -z "$role" || -z "$port" ]] && continue
+                if bash "$DETECT" --write-udev "$role" "$port" >/dev/null 2>&1; then
+                    ok "Stable symlink /dev/parking-${role} → ${port}"
+                else
+                    warn "Could not create /dev/parking-${role} for ${port} — using manual path."
+                fi
+            done <<< "$ASSIGNMENTS"
+        else
+            bash "$DETECT" || warn "Detection exited non-zero — falling back to manual paths where symlinks are missing."
+        fi
     else
         warn "detect-serial-devices.sh not found — using manual device paths."
     fi
@@ -359,7 +398,8 @@ phase_configure() {
     "emoney_reader": {
       "enabled": true,
       "device": "${EMONEY_DEV}",
-      "baudrate": ${EMONEY_BAUD}
+      "baudrate": ${EMONEY_BAUD},
+      "init_key": "${EMONEY_INIT_KEY_HEX}"
     },
     "receipt_printer": {
       "enabled": true,
@@ -379,6 +419,24 @@ phase_configure() {
 EOF
     chown parking:parking /etc/parking/booth.json
     ok "Booth config written to /etc/parking/booth.json"
+
+    # Self-register the POS row so the first heartbeat doesn't 404 and the
+    # admin doesn't have to add it by hand. Idempotent by booth code.
+    info "Registering booth '${BOOTH_CODE}' with the server..."
+    REGISTER_BODY=$(printf '{"booth_code":"%s","name":"%s","ip_address":"%s","default_gate_code":"%s"}' \
+        "$BOOTH_CODE" "$BOOTH_NAME" "$BOOTH_IP" "$GATE_CODE")
+    if REGISTER_JSON=$(curl -fsS -X POST "${API_BASE_URL:-http://${SERVER_IP}}/api/pos/register" \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: ${INTERNAL_API_KEY}" \
+        -d "$REGISTER_BODY" 2>/dev/null); then
+        ok "Booth registered with the server"
+        if [[ -n "$GATE_CODE" ]]; then
+            REGISTERED_GATE=$(python3 -c 'import sys,json; print(json.load(sys.stdin).get("default_gate_id") or "")' <<<"$REGISTER_JSON" 2>/dev/null || true)
+            [[ -z "$REGISTERED_GATE" ]] && warn "Gate '${GATE_CODE}' not found on server — assign it in Device → POS."
+        fi
+    else
+        warn "Booth self-registration failed — add the POS row manually in the admin UI."
+    fi
 
     # booth_bridge talks HTTP only (zero Redis imports) — the old REDIS_HOST
     # hand-off pointed at a Redis that binds 127.0.0.1 on the server anyway.

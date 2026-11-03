@@ -21,6 +21,8 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "/api/auth/login": (5, 60),
     "/api/auth/refresh": (10, 60),
     "/api/payments/": (30, 60),
+    # Enrollment codes are short enough to type; cap guessing attempts.
+    "/api/setup/enroll": (10, 60),
 }
 
 DEFAULT_FALLBACK = (100, 60)  # 100 req/min for everything else
@@ -54,6 +56,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path
+
+        # Test-only switch (RATE_LIMIT_DISABLED=true) for browser suites that
+        # legitimately exercise login many times from one IP.
+        from shared.config import get_settings
+
+        if get_settings().rate_limit_disabled:
+            return await call_next(request)
 
         # Skip exempt paths
         if any(path.startswith(exempt) for exempt in EXEMPT_PATHS):

@@ -1,12 +1,12 @@
 <template>
   <button
     :class="[
-      'flex items-center gap-1.5 border-2 border-foreground px-2 py-1 text-xs font-bold uppercase shadow-brutal-sm transition-all duration-100',
+      'flex items-center gap-1.5 border border-border px-2 py-1 text-xs font-bold  shadow-brutal-sm transition-all duration-100',
       uncovered
-        ? 'bg-destructive text-white hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none'
+        ? 'bg-destructive text-white   hover:shadow-none'
         : pendingHandover
-          ? 'bg-warning text-foreground hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none'
-          : 'bg-surface text-foreground hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none',
+          ? 'bg-warning text-foreground   hover:shadow-none'
+          : 'bg-surface text-foreground   hover:shadow-none',
     ]"
     :title="tooltipText"
     @click="$emit('click')"
@@ -16,8 +16,8 @@
       <circle cx="12" cy="7" r="4" />
     </svg>
     <span class="truncate max-w-[120px]">{{ displayName }}</span>
-    <span v-if="pendingHandover" class="h-2 w-2 border border-foreground bg-foreground animate-pulse" />
-    <span v-else-if="uncovered" class="h-2 w-2 border border-foreground bg-white animate-pulse" />
+    <span v-if="pendingHandover" class="h-2 w-2 border border-border bg-foreground animate-pulse" />
+    <span v-else-if="uncovered" class="h-2 w-2 border border-border bg-white animate-pulse" />
   </button>
 </template>
 

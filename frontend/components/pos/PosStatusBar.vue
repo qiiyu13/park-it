@@ -2,7 +2,7 @@
   <div class="flex items-center justify-between w-full">
     <!-- Left: Local device statuses -->
     <div class="flex items-center gap-4">
-      <span class="text-sm font-black uppercase tracking-wide text-background">Devices</span>
+      <span class="text-xs font-semibold tracking-wider text-sidebar-muted">Perangkat</span>
       <div
         v-for="item in indicators"
         :key="item.label"
@@ -11,16 +11,16 @@
       >
         <span
           :class="[
-            'h-3 w-3 border border-background',
-            item.ok ? 'bg-success' : item.warn ? 'bg-warning animate-pulse' : 'bg-destructive',
+            'h-2 w-2 rounded-full',
+            item.ok ? 'bg-success' : item.warn ? 'bg-warning' : 'bg-destructive',
           ]"
         />
-        <span class="text-base font-bold text-background">{{ item.label }}</span>
+        <span class="text-sm font-medium text-sidebar-foreground">{{ item.label }}</span>
       </div>
     </div>
 
     <!-- Right: Clock -->
-    <div class="font-mono text-xl tabular-nums text-background font-black">{{ clock }}</div>
+    <div class="font-mono text-lg font-medium tabular-nums text-sidebar-foreground">{{ clock }}</div>
   </div>
 </template>
 

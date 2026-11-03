@@ -1,7 +1,7 @@
 <template>
-  <div class="mb-6 flex items-start justify-between gap-3 border-b-4 border-foreground pb-4">
+  <div class="mb-6 flex items-start justify-between gap-3 border-b border-border pb-4">
     <div>
-      <h1 class="text-2xl font-black uppercase tracking-wide text-foreground">{{ title }}</h1>
+      <h1 class="text-2xl font-bold  tracking-wide text-foreground">{{ title }}</h1>
       <p v-if="subtitle" class="mt-1 text-sm font-medium text-muted-foreground">{{ subtitle }}</p>
     </div>
     <div v-if="$slots.action" class="shrink-0">

@@ -44,6 +44,22 @@ class ResultOutbox:
         path = self._path_for(payload)
         path.unlink(missing_ok=True)
 
+    def quarantine(self, payload: dict) -> None:
+        """Move a deterministically-rejected payload out of the retry set.
+
+        A 4xx means the API will reject the same bytes forever; retrying every
+        30s just hammers the server and floods logs. The file is kept (with a
+        .rejected suffix) for manual inspection.
+        """
+        path = self._path_for(payload)
+        if not path.exists():
+            return
+        target = path.with_suffix(".rejected")
+        try:
+            path.replace(target)
+        except OSError as e:
+            logger.error("outbox_quarantine_failed", path=path.name, error=str(e))
+
     def pending(self, *, max_age_s: float = 86400.0) -> list[dict]:
         """Return payloads still awaiting delivery, oldest first.
 

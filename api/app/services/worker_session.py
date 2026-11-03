@@ -120,8 +120,17 @@ async def check_in(
         status="ACTIVE",
         started_at=now,
         is_substitute=is_substitute,
-        original_worker_id=original_worker_id if is_substitute else None,
     )
+    if is_substitute and original_worker_id is not None:
+        # WorkerSession has no original_worker_id column (provenance lives on
+        # the planned ShiftAssignment); log it so the substitution is auditable.
+        logger.info(
+            "substitute_checked_in",
+            session_id=None,
+            worker_id=worker_id,
+            original_worker_id=original_worker_id,
+            gate_id=gate_id,
+        )
     db.add(session)
     await db.commit()
     await db.refresh(session)

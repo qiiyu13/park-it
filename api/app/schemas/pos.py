@@ -43,6 +43,20 @@ class PosResponse(PosBase):
     last_status: dict = Field(default_factory=dict)
 
 
+class BoothRegisterRequest(BaseModel):
+    """Self-registration posted by an enrolled booth installer.
+
+    Authenticated by X-API-Key (the key obtained from /api/setup/enroll).
+    Idempotent by booth_code, so re-running the booth installer updates the
+    same row instead of creating duplicates.
+    """
+
+    booth_code: str = Field(..., max_length=20)
+    name: str = Field(..., max_length=100)
+    ip_address: str | None = Field(None, max_length=45)
+    default_gate_code: str | None = Field(None, max_length=20)
+
+
 class BoothHeartbeat(BaseModel):
     """Booth-self-reported snapshot posted every 15s by booth_bridge.
 

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Install E-Parking
+Comment=Click-through installer
+Exec=bash -c 'cd "$(dirname "%k")" && ./install-gui.sh'
+Icon=system-software-install
+Terminal=false

@@ -9,6 +9,11 @@ export const useApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBaseUrl
 
+  // During SSR the browser's cookies are not attached to a plain Node fetch.
+  // Forward them so route middleware (auth/me) and page data work on a hard
+  // reload/direct URL, not only after a client-side navigation.
+  const ssrHeaders = import.meta.server ? useRequestHeaders(['cookie']) : {}
+
   /**
    * Perform an authenticated fetch request.
    *
@@ -21,6 +26,7 @@ export const useApi = () => {
 
     const defaults = {
       headers: {
+        ...ssrHeaders,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         ...options.headers,

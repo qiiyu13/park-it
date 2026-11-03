@@ -18,26 +18,26 @@
       <div class="flex items-start justify-between gap-4 flex-shrink-0">
         <div class="flex items-start gap-6">
           <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-black uppercase tracking-wider text-muted-foreground leading-none">Durasi</span>
-            <span class="mt-1 flex h-9 items-center text-2xl font-black tabular-nums leading-none text-foreground">{{ formattedDuration || '--' }}</span>
+            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Durasi</span>
+            <span class="mt-1 flex h-9 items-center font-mono text-xl font-semibold tabular-nums leading-none text-foreground">{{ formattedDuration || '--' }}</span>
           </div>
           <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-black uppercase tracking-wider text-muted-foreground leading-none">Masuk</span>
-            <span class="mt-1 flex h-9 items-center text-2xl font-black tabular-nums leading-none text-foreground">{{ formattedEntryTime || '--' }}</span>
+            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Masuk</span>
+            <span class="mt-1 flex h-9 items-center font-mono text-xl font-semibold tabular-nums leading-none text-foreground">{{ formattedEntryTime || '--' }}</span>
           </div>
           <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-black uppercase tracking-wider text-muted-foreground leading-none">Jenis</span>
+            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Jenis</span>
             <div v-if="isMixedLane" class="mt-1 h-9">
               <select
                 :value="activeVehicleTypeId || ''"
-                class="h-9 border-2 border-foreground bg-surface px-2 text-base font-black uppercase text-foreground focus:outline-none focus:shadow-brutal-sm min-w-[96px]"
+                class="h-9 min-w-[96px] rounded-md border border-border bg-surface px-2 text-base font-medium text-foreground focus:border-[color:var(--focus-ring)] focus:outline-none"
                 @change="$emit('update:vehicle-type-id', $event.target.value ? Number($event.target.value) : null)"
               >
                 <option value="">?</option>
                 <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }}</option>
               </select>
             </div>
-            <span v-else class="mt-1 flex h-9 items-center text-2xl font-black uppercase leading-none text-foreground">{{ vehicleTypeName || '--' }}</span>
+            <span v-else class="mt-1 flex h-9 items-center text-xl font-semibold leading-none text-foreground">{{ vehicleTypeName || '--' }}</span>
           </div>
         </div>
 
@@ -46,15 +46,15 @@
       <!-- Center: Plate + tariff stage -->
       <div class="flex flex-1 min-h-0 flex-col items-center justify-center gap-6">
         <div class="flex flex-col items-center w-full">
-          <span class="text-xs font-black uppercase tracking-wider text-muted-foreground self-start ml-[10%]">Plat Nomor</span>
-          <div class="font-mono text-[7rem] font-black tracking-wider leading-none text-foreground mt-2 border-b-4 border-foreground px-8 pb-2">
+          <span class="self-start ml-[10%] text-xs font-medium tracking-wider text-muted-foreground">Plat Nomor</span>
+          <div class="mt-2 border-b border-border px-8 pb-2 font-mono text-[6rem] font-semibold leading-none tracking-tight text-foreground">
             {{ transaction.plate_number }}
           </div>
         </div>
 
         <!-- Tariff highlighted chip -->
-        <div class="inline-flex items-center border-4 border-foreground bg-warning px-10 py-4 shadow-brutal">
-          <span class="font-mono text-5xl font-black tabular-nums text-foreground">
+        <div class="inline-flex items-center rounded-lg border border-primary/40 bg-primary/15 px-10 py-3">
+          <span class="font-mono text-4xl font-semibold tabular-nums text-foreground">
             {{ formattedTariff }}
           </span>
         </div>
@@ -95,14 +95,14 @@
       <!-- Bottom: Timeout progress -->
       <div v-if="showTimeout" class="flex-shrink-0 space-y-1.5">
         <div class="flex items-center justify-between text-xs">
-          <span class="uppercase tracking-wider font-black text-muted-foreground">Timeout</span>
-          <span :class="timeoutTextColor" class="font-mono tabular-nums font-black">
+          <span class="text-xs font-medium tracking-wider text-muted-foreground">Timeout</span>
+          <span :class="timeoutTextColor" class="font-mono text-xs font-semibold tabular-nums">
             {{ waitingSeconds }}s / {{ timeoutSeconds }}s
           </span>
         </div>
-        <div class="h-3 w-full border-2 border-foreground bg-surface overflow-hidden">
+        <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            :class="['h-full transition-all duration-1000', timeoutBarColor]"
+            :class="['h-full rounded-full transition-all duration-1000', timeoutBarColor]"
             :style="{ width: `${timeoutPercent}%` }"
           />
         </div>
@@ -112,14 +112,14 @@
     <!-- Right rail (matches idle aside structure for stable transition) -->
     <aside class="flex w-96 flex-shrink-0 flex-col gap-3 min-h-0">
       <section>
-        <div class="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground">
           <span>Live Exit</span>
           <span v-if="liveExitCameras[0]?.label" class="text-muted-foreground/60">{{ liveExitCameras[0].label }}</span>
         </div>
         <CameraColumn :cameras="liveExitCameras" :placeholder-count="1" />
       </section>
       <section>
-        <div class="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground">
           <span>Snapshot Masuk</span>
           <span v-if="entryCameras[0]?.label" class="text-muted-foreground/60">{{ entryCameras[0].label }}</span>
         </div>

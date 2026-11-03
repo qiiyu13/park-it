@@ -6,14 +6,14 @@
       </DialogHeader>
 
       <div class="space-y-4">
-        <div class="border-2 border-foreground bg-surface p-3 text-center shadow-brutal-sm">
+        <div class="border border-border bg-surface p-3 text-center shadow-brutal-sm">
           <div class="text-sm font-medium text-muted-foreground">
             Scan kartu RFID member atau ketik nomor kartu secara manual
           </div>
         </div>
 
         <div class="space-y-2">
-          <label class="text-sm font-bold uppercase tracking-wide text-foreground">Nomor Kartu RFID</label>
+          <label class="text-sm font-bold  tracking-wide text-foreground">Nomor Kartu RFID</label>
           <Input
             ref="cardInput"
             v-model="cardNumber"

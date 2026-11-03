@@ -1,8 +1,9 @@
 """Report routes (admin only)."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +20,24 @@ from api.app.services.report_export import (
     export_summary_xlsx,
 )
 from api.database import get_db
+from shared.config import get_settings
 from shared.logging import get_logger
 
 logger = get_logger("report_routes")
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+
+def _local_bounds(date_from: date, date_to: date) -> tuple[datetime, datetime]:
+    """Inclusive local-day bounds for a timestamptz column.
+
+    Both endpoints of the picker are calendar days in the facility timezone;
+    the upper bound is the start of the day after ``date_to`` (exclusive).
+    """
+    tz = ZoneInfo(get_settings().app_timezone)
+    start = datetime.combine(date_from, time.min, tzinfo=tz)
+    end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=tz)
+    return start, end
 
 
 @router.get("/summary", response_model=SummaryReport)
@@ -33,7 +47,9 @@ async def get_summary_report(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ) -> SummaryReport:
-    """Get parking summary report for date range."""
+    """Get parking summary report for date range (both dates inclusive)."""
+    start, end = _local_bounds(date_from, date_to)
+
     # Single query with conditional aggregation
     stmt = select(
         func.count(ParkingTransaction.id).label("total"),
@@ -59,8 +75,8 @@ async def get_summary_report(
             else_=0,
         )).label("completed_count"),
     ).where(
-        ParkingTransaction.entry_time >= date_from,
-        ParkingTransaction.entry_time < date_to,
+        ParkingTransaction.entry_time >= start,
+        ParkingTransaction.entry_time < end,
     )
 
     result = await db.execute(stmt)
@@ -90,19 +106,21 @@ async def get_emoney_report(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ) -> EmoneyReport:
-    """Get e-money report for date range."""
+    """Get e-money report for date range (both dates inclusive)."""
+    start, end = _local_bounds(date_from, date_to)
+
     # Total e-money transactions
     total_stmt = select(func.count(EmoneyTransaction.id)).where(
-        EmoneyTransaction.created_at >= date_from,
-        EmoneyTransaction.created_at < date_to,
+        EmoneyTransaction.created_at >= start,
+        EmoneyTransaction.created_at < end,
     )
     total_result = await db.execute(total_stmt)
     total_emoney = total_result.scalar() or 0
 
     # Total deducted
     deducted_stmt = select(func.sum(EmoneyTransaction.amount_deducted)).where(
-        EmoneyTransaction.created_at >= date_from,
-        EmoneyTransaction.created_at < date_to,
+        EmoneyTransaction.created_at >= start,
+        EmoneyTransaction.created_at < end,
     )
     deducted_result = await db.execute(deducted_stmt)
     total_deducted = deducted_result.scalar() or 0
@@ -112,8 +130,8 @@ async def get_emoney_report(
         EmoneyTransaction.status,
         func.count(EmoneyTransaction.id),
     ).where(
-        EmoneyTransaction.created_at >= date_from,
-        EmoneyTransaction.created_at < date_to,
+        EmoneyTransaction.created_at >= start,
+        EmoneyTransaction.created_at < end,
     ).group_by(EmoneyTransaction.status)
     status_result = await db.execute(status_stmt)
 
@@ -130,15 +148,15 @@ async def get_emoney_report(
 
     # Settlement counts
     settled_stmt = select(func.count(EmoneyTransaction.id)).where(
-        EmoneyTransaction.created_at >= date_from,
-        EmoneyTransaction.created_at < date_to,
+        EmoneyTransaction.created_at >= start,
+        EmoneyTransaction.created_at < end,
         EmoneyTransaction.settlement_batch_id.isnot(None),
     )
     settled_result = await db.execute(settled_stmt)
 
     unsettled_stmt = select(func.count(EmoneyTransaction.id)).where(
-        EmoneyTransaction.created_at >= date_from,
-        EmoneyTransaction.created_at < date_to,
+        EmoneyTransaction.created_at >= start,
+        EmoneyTransaction.created_at < end,
         EmoneyTransaction.settlement_batch_id.is_(None),
         EmoneyTransaction.status == "SUCCESS",
     )
@@ -166,11 +184,14 @@ async def get_shift_report(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ) -> ShiftReport:
-    """Get parking shift report for date range."""
+    """Get parking shift report for date range (both dates inclusive)."""
+    tz_name = get_settings().app_timezone
+    local_day = func.date(func.timezone(tz_name, ParkingTransaction.entry_time))
+
     query = select(
         Shift.id.label("shift_id"),
         Shift.name.label("shift_name"),
-        func.date(ParkingTransaction.entry_time).label("date"),
+        local_day.label("date"),
         ParkingTransaction.operator_id,
         User.full_name.label("operator_name"),
         func.count(ParkingTransaction.id).label("total_transactions"),
@@ -195,12 +216,12 @@ async def get_shift_report(
     ).outerjoin(
         User, User.id == ParkingTransaction.operator_id
     ).where(
-        func.date(ParkingTransaction.entry_time) >= date_from,
-        # Inclusive of date_to: this compares calendar dates (func.date), so
-        # <= keeps the whole selected end day instead of dropping it.
-        func.date(ParkingTransaction.entry_time) <= date_to,
+        # Compare local calendar dates on both bounds so the selected end day
+        # is fully included (the summary endpoints use the same inclusive rule).
+        local_day >= date_from,
+        local_day <= date_to,
     ).group_by(
-        Shift.id, Shift.name, func.date(ParkingTransaction.entry_time),
+        Shift.id, Shift.name, local_day,
         ParkingTransaction.operator_id, User.full_name,
     )
 
@@ -252,7 +273,7 @@ async def get_daily_report(
     """Get summary report for a single day."""
     return await get_summary_report(
         date_from=report_date,
-        date_to=report_date + timedelta(days=1),
+        date_to=report_date,
         db=db,
         current_user=current_user,
     )
@@ -265,15 +286,15 @@ async def get_weekly_report(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ) -> SummaryReport:
-    """Get summary report for a specific week."""
-    from datetime import datetime
-
-    jan1 = datetime(year, 1, 1).date()
-    monday = jan1 + timedelta(days=(week - 1) * 7 - jan1.weekday())
+    """Get summary report for an ISO week (Monday-Sunday)."""
+    try:
+        monday = date.fromisocalendar(year, week, 1)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Year has no ISO week 53") from e
 
     return await get_summary_report(
         date_from=monday,
-        date_to=monday + timedelta(days=7),
+        date_to=monday + timedelta(days=6),
         db=db,
         current_user=current_user,
     )
@@ -290,7 +311,7 @@ async def get_monthly_report(
     from calendar import monthrange
 
     start = date(year, month, 1)
-    end = date(year, month, monthrange(year, month)[1]) + timedelta(days=1)
+    end = date(year, month, monthrange(year, month)[1])
 
     return await get_summary_report(
         date_from=start,
@@ -309,7 +330,12 @@ async def export_summary(
     current_user: dict = Depends(require_admin),
 ):
     """Export summary report in specified format."""
-    report = await get_summary_report(date_from, date_to, db, current_user)
+    report = await get_summary_report(
+        date_from=date_from,
+        date_to=date_to,
+        db=db,
+        current_user=current_user,
+    )
 
     site_result = await db.execute(select(SiteConfig))
     site = site_result.scalar_one_or_none()

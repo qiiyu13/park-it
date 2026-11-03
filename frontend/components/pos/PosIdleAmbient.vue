@@ -3,15 +3,15 @@
     <!-- Left: ambient clock + waiting prompt -->
     <div class="relative flex flex-1 min-h-0 flex-col items-center justify-center">
       <div
-        class="flex h-72 w-72 items-center justify-center border-4 border-foreground bg-surface shadow-brutal-lg"
+        class="flex h-64 w-72 items-center justify-center rounded-2xl border border-border bg-surface shadow-brutal-lg"
       >
         <div class="text-center">
           <div
-            class="font-mono text-7xl font-black leading-none tracking-tight tabular-nums text-foreground"
+            class="font-mono text-6xl font-semibold leading-none tracking-tight tabular-nums text-foreground"
           >
             {{ clockHHMM }}
           </div>
-          <div class="mt-3 text-xs font-black uppercase tracking-[0.25em] text-muted-foreground">
+          <div class="mt-3 text-xs font-medium tracking-[0.2em] text-muted-foreground">
             {{ dayDateLabel }}
           </div>
         </div>
@@ -23,7 +23,7 @@
           v-model="barcodeValue"
           data-barcode-input
           placeholder="Scan barcode atau ketik nomor plat..."
-          class="h-16 text-center font-mono text-2xl font-bold uppercase tracking-wider border-4 focus-visible:shadow-brutal-lg"
+          class="h-16 rounded-lg text-center font-mono text-xl font-medium tracking-wide"
           @keydown.enter="onBarcodeSubmit"
         />
       </div>
@@ -33,7 +33,7 @@
     <aside class="flex w-96 flex-shrink-0 flex-col gap-3 min-h-0">
       <section>
         <div
-          class="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground"
+          class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground"
         >
           <span>Live Exit</span>
           <span v-if="exitCameraLabel" class="text-muted-foreground/60">{{ exitCameraLabel }}</span>
@@ -43,7 +43,7 @@
 
       <section>
         <div
-          class="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground"
+          class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground"
         >
           <span>Snapshot Masuk</span>
           <span v-if="lastEntry?.gateLabel" class="text-muted-foreground/60">
@@ -51,7 +51,7 @@
           </span>
         </div>
         <div
-          class="w-full aspect-video overflow-hidden border-2 border-foreground bg-muted/10"
+          class="w-full aspect-video overflow-hidden rounded-lg border border-border bg-muted/20"
         >
           <img
             v-if="lastEntry?.snapshotUrl"
@@ -69,13 +69,13 @@
         </div>
         <div
           v-if="lastEntry?.plateNumber"
-          class="mt-2 flex items-center justify-between border-2 border-foreground bg-surface px-3 py-2 shadow-brutal-sm"
+          class="mt-2 flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 shadow-brutal-sm"
         >
           <div>
-            <div class="font-mono text-sm font-black tracking-wider text-foreground">
+            <div class="font-mono text-sm font-bold tracking-wider text-foreground">
               {{ lastEntry.plateNumber }}
             </div>
-            <div class="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            <div class="text-[10px] font-bold  tracking-wide text-muted-foreground">
               {{ lastEntry.subtitle || 'baru saja masuk' }}
             </div>
           </div>

@@ -1,10 +1,9 @@
 <template>
   <button
     :class="[
-      'w-full h-14 flex items-center justify-between px-5 border-2 border-foreground font-black uppercase text-lg text-white shadow-brutal transition-all duration-100',
-      'hover:enabled:translate-x-[2px] hover:enabled:translate-y-[2px] hover:enabled:shadow-none',
-      'active:enabled:translate-x-[4px] active:enabled:translate-y-[4px]',
-      'disabled:opacity-30 disabled:cursor-not-allowed',
+      'w-full h-16 flex items-center justify-between rounded-lg px-5 border border-transparent font-semibold text-lg text-white shadow-brutal-sm transition-colors duration-150',
+      'hover:enabled:brightness-95',
+      'disabled:opacity-35 disabled:cursor-not-allowed',
       buttonColorClass,
     ]"
     :disabled="disabled || processing"
@@ -16,7 +15,7 @@
     </div>
     <div class="text-sm opacity-70 font-bold">
       <div v-if="processing" class="flex items-center gap-2">
-        <span class="h-4 w-4 animate-spin border-2 border-white/20 border-t-white" />
+        <span class="h-4 w-4 animate-spin border border-white/20 border-t-white" />
       </div>
       <span v-else>{{ shortcut }}</span>
     </div>
@@ -38,10 +37,10 @@ defineEmits(['click'])
 
 const buttonColorClass = computed(() => {
   switch (props.icon) {
-    case 'cash': return 'bg-cash'
-    case 'rfid': return 'bg-rfid'
+    case 'cash': return 'bg-success'
+    case 'rfid': return 'bg-info'
     case 'emoney': return 'bg-emoney'
-    default: return 'bg-primary'
+    default: return 'bg-primary text-primary-foreground'
   }
 })
 

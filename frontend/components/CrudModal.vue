@@ -10,17 +10,17 @@
           v-for="(group, gIdx) in groups"
           :key="group.title || gIdx"
           class="space-y-4"
-          :class="group.title ? 'border-2 border-foreground p-4 shadow-brutal-sm' : ''"
+          :class="group.title ? 'border border-border p-4 shadow-brutal-sm' : ''"
         >
           <legend
             v-if="group.title"
-            class="border-2 border-foreground bg-primary px-2 py-0.5 text-xs font-black uppercase tracking-wider text-foreground shadow-brutal-sm"
+            class="border border-border bg-primary px-2 py-0.5 text-xs font-bold  tracking-wider text-foreground shadow-brutal-sm"
           >
             {{ group.title }}
           </legend>
 
           <div v-for="field in group.items" :key="field.prop" class="space-y-2">
-            <label class="text-sm font-bold uppercase tracking-wide text-foreground">
+            <label class="text-sm font-bold  tracking-wide text-foreground">
               {{ field.label }}
               <span v-if="field.required" class="text-destructive">*</span>
             </label>
@@ -41,7 +41,7 @@
               :rows="field.rows || 3"
               :placeholder="field.placeholder || ''"
               :disabled="field.disabled"
-              class="w-full border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
+              class="w-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
             />
 
             <!-- Select -->
@@ -49,7 +49,7 @@
               v-else-if="field.type === 'select'"
               v-model="formData[field.prop]"
               :disabled="field.disabled"
-              class="w-full border-2 border-foreground bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
+              class="w-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
             >
               <option value="" disabled>{{ field.placeholder || 'Pilih...' }}</option>
               <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
@@ -62,19 +62,19 @@
               <button
                 type="button"
                 :class="[
-                  'relative inline-flex h-7 w-12 shrink-0 cursor-pointer border-2 border-foreground transition-all duration-100',
+                  'relative inline-flex h-7 w-12 shrink-0 cursor-pointer border border-border transition-all duration-100',
                   formData[field.prop] ? 'bg-primary shadow-brutal-sm' : 'bg-muted',
                 ]"
                 @click="formData[field.prop] = !formData[field.prop]"
               >
                 <span
                   :class="[
-                    'pointer-events-none inline-block h-5 w-5 border-2 border-foreground bg-background transition-transform',
+                    'pointer-events-none inline-block h-5 w-5 border border-border bg-background transition-transform',
                     formData[field.prop] ? 'translate-x-5' : 'translate-x-0',
                   ]"
                 />
               </button>
-              <span class="text-sm font-bold uppercase text-foreground">
+              <span class="text-sm font-bold  text-foreground">
                 {{ formData[field.prop] ? 'Ya' : 'Tidak' }}
               </span>
             </div>

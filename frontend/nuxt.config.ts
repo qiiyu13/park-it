@@ -14,6 +14,9 @@ export default defineNuxtConfig({
       apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || 'http://localhost:8000',
       wsBaseUrl: process.env.NUXT_PUBLIC_WS_BASE_URL || 'ws://localhost:8000',
       boothBridgeUrl: process.env.NUXT_PUBLIC_BOOTH_BRIDGE_URL || 'ws://localhost:5678/',
+      // Dev-only auto-login. Off by default so the login/auth flow is actually
+      // exercised in development; opt in with NUXT_PUBLIC_DEV_AUTH=1.
+      devAuth: process.env.NUXT_PUBLIC_DEV_AUTH === '1',
     },
   },
 

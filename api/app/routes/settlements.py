@@ -1,6 +1,6 @@
 """Settlement routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
 from api.app.middleware.auth import require_admin
@@ -54,19 +54,29 @@ async def trigger_settlement(
     db=Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """Manually trigger settlement file generation.
+    """Queue settlement file generation in the background worker.
 
-    Passes the real ARQ redis in ctx — without it the day-lock is bypassed
-    (double-settlement racing the 02:00 cron) and generated files are never
-    enqueued for upload. The lockless path still exists for Redis outages
-    (SKIP LOCKED protects), but here Redis is available by definition.
+    Previously this ran the whole generation (and its bank-facing SFTP
+    enqueues) inline inside the HTTP request, blocking an API worker and
+    timing out on large batches. The background worker owns the day-lock and
+    the ARQ context, so enqueueing is the correct boundary.
     """
     from shared.redis import get_arq_redis
-    from workers.background.settlement_worker import generate_settlement_file
 
     try:
-        ctx = {"redis": await get_arq_redis()}
-    except Exception:
-        ctx = {}
-    result = await generate_settlement_file(ctx)
-    return SettlementTriggerResponse(**result)
+        arq = await get_arq_redis()
+        await arq.enqueue_job(
+            "generate_settlement_file",
+            _queue_name="arq:queue:background",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Settlement queue unavailable: {e}",
+        ) from e
+
+    return SettlementTriggerResponse(
+        status="queued",
+        files_generated=0,
+        total_transactions=0,
+    )
