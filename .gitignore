@@ -98,3 +98,6 @@ pids/
 
 
 graphify-out/
+
+# Vision models
+license_plate_detector.pt

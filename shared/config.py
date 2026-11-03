@@ -102,6 +102,11 @@ class Settings(BaseSettings):
         default=0.8, alias="ANPR_CONFIDENCE_THRESHOLD"
     )
 
+    # ── Plate Detection (YOLO model for cropping plate region) ────────
+    plate_detection_model: str = Field(
+        default="license_plate_detector", alias="PLATE_DETECTION_MODEL"
+    )
+
     # ── Vehicle Detection ─────────────────────────────────────────────
     vehicle_detection_enabled: bool = Field(
         default=False, alias="VEHICLE_DETECTION_ENABLED"

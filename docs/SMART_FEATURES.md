@@ -72,6 +72,22 @@ Military:      [varies]
 - **Compute**: Runs on CPU. No GPU required. ~150ms per frame on Intel N100 or similar.
 - **No additional hardware needed** if cameras are already deployed.
 
+### Plate Detection Model
+
+For best accuracy, install a pre-trained license plate detection model:
+
+1. Visit [Roboflow Universe](https://universe.roboflow.com)
+2. Search for "license plate detection" or "plat nomor"
+3. Download the YOLOv8 `.pt` weights file
+4. Place it in the project root as `license_plate_detector.pt`
+5. Optional: set `PLATE_DETECTION_MODEL=my_model_name` if using a different filename
+
+**Recommended models** (community-uploaded, tested with Indonesian plates):
+- `license-plate-detection-v8` (general purpose)
+- Search `plat-nomor-indonesia` for country-specific models
+
+When a plate detection model is available, the ANPR pipeline crops the plate region before OCR, significantly improving accuracy. If no model is found, the system falls back to full-frame OCR (reduced accuracy).
+
 ### Fallback When Disabled
 
 When `ANPR_ENABLED=false`:
