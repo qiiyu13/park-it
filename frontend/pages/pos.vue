@@ -21,11 +21,11 @@
       v-if="posRegistrationError"
       class="fixed inset-0 z-40 flex items-center justify-center bg-background/95 p-6"
     >
-      <div class="w-full max-w-lg border border-border bg-surface p-6 shadow-brutal-lg">
-        <div class="text-xs font-bold  tracking-widest text-destructive">
+      <div class="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-brutal-lg">
+        <div class="text-xs font-semibold text-destructive">
           POS Tidak Terdaftar
         </div>
-        <h1 class="mt-2 text-2xl font-bold ">
+        <h1 class="mt-2 text-2xl font-semibold tracking-tight">
           Komputer ini belum terhubung ke booth
         </h1>
         <p class="mt-3 text-sm text-muted-foreground">
@@ -35,7 +35,7 @@
           <Button variant="outline" @click="navigateTo('/')">
             Kembali ke Dashboard
           </Button>
-          <Button @click="() => window.location.reload()">Coba Lagi</Button>
+          <Button @click="reloadPage">Coba Lagi</Button>
         </div>
       </div>
     </div>
@@ -178,6 +178,10 @@ const { detectCardType, maskCardNumber } = useFormatters()
 const selectedGate = computed(() =>
   websiteStore.activeGateOuts.find((g) => g.id === gateStore.selectedGateOutId)
 )
+
+function reloadPage() {
+  window.location.reload()
+}
 
 // Worker session state
 const showHandoverDialog = ref(false)

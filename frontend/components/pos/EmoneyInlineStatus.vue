@@ -1,10 +1,10 @@
 <template>
-  <div v-if="visible" class="border border-border bg-surface p-4 shadow-brutal">
+  <div v-if="visible" class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
     <!-- Card info header -->
     <div v-if="cardInfo" class="mb-3 flex items-center justify-between">
       <div>
-        <div class="text-xs font-bold  tracking-wide text-muted-foreground">{{ cardInfo.cardType }}</div>
-        <div class="font-mono text-sm font-bold text-foreground tracking-wide">{{ cardInfo.cardNumber }}</div>
+        <div class="text-xs font-semibold text-muted-foreground">{{ cardInfo.cardType }}</div>
+        <div class="font-mono text-sm font-semibold text-foreground tracking-wide">{{ cardInfo.cardNumber }}</div>
       </div>
       <Badge :variant="stateVariant">{{ stateLabel }}</Badge>
     </div>
@@ -19,24 +19,24 @@
       <!-- Processing -->
       <div v-if="emoneyState === 'PROCESSING'" class="text-center py-1">
         <div class="flex items-center justify-center gap-2">
-          <span class="h-3 w-3 border border-border bg-warning animate-pulse" />
-          <span class="text-sm font-bold  text-warning">Memproses pembayaran...</span>
+          <span class="h-3 w-3 rounded-full bg-warning animate-pulse" />
+          <span class="text-sm font-semibold text-warning">Memproses pembayaran...</span>
         </div>
         <div class="mt-1 text-xs font-medium text-muted-foreground">Jangan geser kartu</div>
       </div>
 
       <!-- Success -->
       <div v-if="emoneyState === 'SUCCESS'" class="text-center py-1">
-        <div class="text-base font-bold  text-success">Pembayaran Berhasil</div>
+        <div class="text-base font-semibold text-success">Pembayaran Berhasil</div>
         <div v-if="balance != null" class="mt-1">
           <span class="text-xs font-medium text-muted-foreground">Saldo tersisa: </span>
-          <span class="font-mono text-base font-bold text-foreground">{{ formattedBalance }}</span>
+          <span class="font-mono text-base font-semibold text-foreground">{{ formattedBalance }}</span>
         </div>
       </div>
 
       <!-- Error states -->
       <div v-if="isError" class="text-center py-1">
-        <div class="text-sm font-bold  text-destructive">{{ errorMessage }}</div>
+        <div class="text-sm font-semibold text-destructive">{{ errorMessage }}</div>
       </div>
     </div>
 

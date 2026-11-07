@@ -10,17 +10,17 @@
         <input
           v-model="dateFrom"
           type="date"
-          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="form-control"
         >
-        <span class="font-bold text-foreground">s/d</span>
+        <span class="text-sm text-muted-foreground">s/d</span>
         <input
           v-model="dateTo"
           type="date"
-          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="form-control"
         >
         <select
           v-model="statusFilter"
-          class="border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="form-control"
         >
           <option value="">Semua Status</option>
           <option value="ACTIVE">Aktif</option>
@@ -37,6 +37,7 @@
         :show-edit="false"
         :show-delete="false"
         server-pagination
+        :page-size="transactionPageSize"
         :total-items="transactionTotal"
         @page-change="handleTransactionPageChange"
         @size-change="handleTransactionSizeChange"
@@ -76,6 +77,7 @@ import { Button } from '~/components/ui/button'
 definePageMeta({ middleware: 'auth' })
 
 const { fetchApi } = useApi()
+const { formatCurrency } = useFormatters()
 
 // Gate id/code → name lookup so log tables show "Gate Keluar 1" not "5"/"GOUT-01".
 const gateNameMap = ref({})
@@ -137,7 +139,7 @@ const transactionColumns = [
   { prop: 'exit_time', label: 'Keluar', width: 160, formatter: (v) => v ? new Date(v).toLocaleString('id-ID') : '-' },
   { prop: 'duration_minutes', label: 'Durasi (menit)', width: 120 },
   { prop: 'payment_method', label: 'Metode', width: 110 },
-  { prop: 'fee', label: 'Tarif', width: 120, formatter: (v) => v ? `Rp ${v.toLocaleString()}` : '-' },
+  { prop: 'fee', label: 'Tarif', width: 120, formatter: (v) => v ? formatCurrency(v) : '-' },
   { prop: 'status', label: 'Status', width: 120, type: 'enum' },
 ]
 

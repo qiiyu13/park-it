@@ -19,7 +19,7 @@
             @click="pickWorker(worker)"
           >
             <div class="pos-display text-xl leading-none truncate">{{ worker.full_name || worker.username }}</div>
-            <div class="text-[10px] pos-label text-muted-foreground truncate">{{ workerSub(worker) }}</div>
+            <div class="text-xs pos-label text-muted-foreground truncate">{{ workerSub(worker) }}</div>
           </button>
           <div v-if="!workers.length" class="col-span-5 py-6 text-center pos-body text-sm text-muted-foreground">
             Tidak ada petugas aktif — hubungi admin untuk mengatur PIN.

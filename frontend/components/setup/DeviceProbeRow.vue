@@ -5,7 +5,7 @@
         <div class="flex gap-2">
           <select
             v-model="localDevice"
-            class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono"
+            class="form-control flex-1 font-mono"
             @change="emitUpdate"
           >
             <option value="">— pilih perangkat —</option>
@@ -36,7 +36,7 @@
       <WizardField label="Baudrate" class="w-32">
         <select
           v-model.number="localBaudrate"
-          class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          class="form-control w-full"
           @change="emitUpdate"
         >
           <option v-for="b in baudrates" :key="b" :value="b">{{ b }}</option>
@@ -74,7 +74,7 @@
         <div class="flex gap-2">
           <select
             v-if="scanCandidates.length"
-            class="w-40 rounded-md border border-border bg-background px-2 py-2 text-xs font-mono"
+            class="form-control w-40 text-xs font-mono"
             @change="(e) => { localHost = e.target.value; emitUpdate() }"
           >
             <option value="">— hasil scan —</option>

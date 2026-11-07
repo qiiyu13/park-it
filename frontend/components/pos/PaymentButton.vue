@@ -1,7 +1,7 @@
 <template>
   <button
     :class="[
-      'w-full h-16 flex items-center justify-between rounded-lg px-5 border border-transparent font-semibold text-lg text-white shadow-brutal-sm transition-colors duration-150',
+      'w-full h-16 flex items-center justify-between rounded-lg px-5 border border-transparent font-semibold text-lg text-on-solid shadow-brutal-sm transition-colors duration-150',
       'hover:enabled:brightness-95',
       'disabled:opacity-35 disabled:cursor-not-allowed',
       buttonColorClass,
@@ -13,9 +13,9 @@
       <component :is="iconComponent" class="w-8 h-8" />
       <span>{{ label }}</span>
     </div>
-    <div class="text-sm opacity-70 font-bold">
+    <div class="text-sm font-semibold opacity-80">
       <div v-if="processing" class="flex items-center gap-2">
-        <span class="h-4 w-4 animate-spin border border-white/20 border-t-white" />
+        <span class="h-4 w-4 animate-spin rounded-full border-2 border-on-solid/30 border-t-on-solid" />
       </div>
       <span v-else>{{ shortcut }}</span>
     </div>

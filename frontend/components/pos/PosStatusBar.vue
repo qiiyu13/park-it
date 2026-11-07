@@ -20,7 +20,10 @@
     </div>
 
     <!-- Right: Clock -->
-    <div class="font-mono text-lg font-medium tabular-nums text-sidebar-foreground">{{ clock }}</div>
+    <div class="flex items-center gap-2">
+      <ThemeToggle class="text-sidebar-muted hover:bg-white/10 hover:text-sidebar-foreground" />
+      <div class="font-mono text-lg font-medium tabular-nums text-sidebar-foreground">{{ clock }}</div>
+    </div>
   </div>
 </template>
 

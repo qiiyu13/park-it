@@ -1,13 +1,16 @@
 <template>
-  <div class="mb-4 flex gap-1">
+  <div class="mb-4 flex flex-wrap gap-1" role="tablist">
     <button
       v-for="tab in tabs"
       :key="tab.key"
+      type="button"
+      role="tab"
+      :aria-selected="modelValue === tab.key"
       :class="[
-        'border border-border px-4 py-2 text-sm font-bold  tracking-wide transition-all duration-100',
+        'h-9 rounded-md px-4 text-sm font-medium transition-colors duration-150',
         modelValue === tab.key
-          ? 'bg-primary text-foreground shadow-brutal'
-          : 'bg-background text-muted-foreground hover:bg-surface hover:text-foreground shadow-brutal-sm   hover:shadow-none',
+          ? 'bg-primary text-primary-foreground'
+          : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground',
       ]"
       @click="$emit('update:modelValue', tab.key)"
     >

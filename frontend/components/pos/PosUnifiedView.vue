@@ -112,16 +112,16 @@
     <!-- Right rail (matches idle aside structure for stable transition) -->
     <aside class="flex w-96 flex-shrink-0 flex-col gap-3 min-h-0">
       <section>
-        <div class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground">
+        <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground">
           <span>Live Exit</span>
-          <span v-if="liveExitCameras[0]?.label" class="text-muted-foreground/60">{{ liveExitCameras[0].label }}</span>
+          <span v-if="liveExitCameras[0]?.label" class="text-muted-foreground">{{ liveExitCameras[0].label }}</span>
         </div>
         <CameraColumn :cameras="liveExitCameras" :placeholder-count="1" />
       </section>
       <section>
-        <div class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground">
+        <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground">
           <span>Snapshot Masuk</span>
-          <span v-if="entryCameras[0]?.label" class="text-muted-foreground/60">{{ entryCameras[0].label }}</span>
+          <span v-if="entryCameras[0]?.label" class="text-muted-foreground">{{ entryCameras[0].label }}</span>
         </div>
         <CameraColumn :cameras="entryCameras" :placeholder-count="1" />
       </section>

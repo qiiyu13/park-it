@@ -1,32 +1,29 @@
 <template>
   <article
-    :class="[
-      'border border-border bg-surface p-4 shadow-brutal transition-all duration-100',
-      online ? 'border-l border-l-success' : '',
-    ]"
+    class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm"
   >
     <header class="flex items-start justify-between gap-2">
       <div>
-        <p class="text-xs font-mono font-bold text-muted-foreground">{{ gate.code }}</p>
-        <h3 class="font-bold  tracking-wide text-foreground">{{ gate.name }}</h3>
+        <p class="font-mono text-xs font-medium text-muted-foreground">{{ gate.code }}</p>
+        <h3 class="font-semibold tracking-tight text-foreground">{{ gate.name }}</h3>
       </div>
       <StatusPill :status="online ? 'online' : 'offline'" />
     </header>
 
-    <p class="mt-1 text-xs font-medium text-muted-foreground">
+    <p class="mt-1 text-xs text-muted-foreground">
       {{ protocolLabel }} · {{ connectionLabel }}
     </p>
 
     <div class="mt-3 space-y-1.5 text-xs">
       <div v-for="p in peripherals" :key="p.key" class="flex items-center justify-between">
-        <span class="font-bold text-foreground">{{ p.label }}</span>
+        <span class="font-medium text-foreground">{{ p.label }}</span>
         <StatusPill :status="p.status" :label="p.detail" />
       </div>
     </div>
 
-    <p class="mt-3 text-[11px] font-medium text-muted-foreground">
+    <p class="mt-3 text-xs text-muted-foreground">
       Heartbeat:
-      <span class="font-mono font-bold">{{ heartbeatLabel }}</span>
+      <span class="font-mono font-medium">{{ heartbeatLabel }}</span>
     </p>
 
     <div class="mt-3 flex flex-wrap gap-2">

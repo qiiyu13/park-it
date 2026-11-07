@@ -6,18 +6,18 @@
       </DialogHeader>
 
       <div class="space-y-4">
-        <div class="border border-border bg-surface p-3 text-center shadow-brutal-sm">
+        <div class="rounded-lg border border-border bg-surface p-3 text-center">
           <div class="text-sm font-medium text-muted-foreground">
             Scan kartu RFID member atau ketik nomor kartu secara manual
           </div>
         </div>
 
         <div class="space-y-2">
-          <label class="text-sm font-bold  tracking-wide text-foreground">Nomor Kartu RFID</label>
+          <label class="text-sm font-medium text-foreground">Nomor Kartu RFID</label>
           <Input
             ref="cardInput"
             v-model="cardNumber"
-            class="h-12 text-lg font-mono font-bold tracking-wider"
+            class="h-12 text-lg font-mono font-semibold tracking-wider"
             placeholder="Scan atau ketik nomor kartu"
             @keydown.enter="onConfirm"
           />
@@ -28,7 +28,7 @@
         <Button variant="outline" @click="$emit('update:open', false)">Batal</Button>
         <Button
           :disabled="!cardNumber.trim()"
-          class="bg-rfid hover:bg-rfid/90 text-white"
+          class="bg-rfid hover:bg-rfid/90 text-on-solid"
           @click="onConfirm"
         >
           Proses

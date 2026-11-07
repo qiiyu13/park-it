@@ -69,6 +69,7 @@
         <h1 class="text-base font-semibold tracking-tight text-foreground">{{ pageTitle }}</h1>
         <div class="flex items-center gap-4">
           <span class="font-mono text-sm text-muted-foreground">{{ clock }}</span>
+          <ThemeToggle class="text-muted-foreground hover:bg-surface-hover hover:text-foreground" />
           <span
 :class="[
             'rounded-full border border-border px-2.5 py-0.5 text-[11px] font-semibold',
@@ -130,6 +131,7 @@ const operatorItems = [
 
 const adminItems = [
   { path: '/', label: 'Dashboard', icon: markRaw(LayoutGrid) },
+  { path: '/gate-in', label: 'Gate In', icon: markRaw(LogIn) },
   { path: '/gates-status', label: 'Gate Status', icon: markRaw(Activity) },
   { path: '/transaksi', label: 'Transaksi', icon: markRaw(FileText) },
   { path: '/member', label: 'Member', icon: markRaw(Users) },

@@ -10,17 +10,17 @@
           v-for="(group, gIdx) in groups"
           :key="group.title || gIdx"
           class="space-y-4"
-          :class="group.title ? 'border border-border p-4 shadow-brutal-sm' : ''"
+          :class="group.title ? 'rounded-lg border border-border p-4' : ''"
         >
           <legend
             v-if="group.title"
-            class="border border-border bg-primary px-2 py-0.5 text-xs font-bold  tracking-wider text-foreground shadow-brutal-sm"
+            class="px-1.5 text-xs font-semibold text-muted-foreground"
           >
             {{ group.title }}
           </legend>
 
           <div v-for="field in group.items" :key="field.prop" class="space-y-2">
-            <label class="text-sm font-bold  tracking-wide text-foreground">
+            <label class="text-sm font-medium text-foreground">
               {{ field.label }}
               <span v-if="field.required" class="text-destructive">*</span>
             </label>
@@ -41,7 +41,7 @@
               :rows="field.rows || 3"
               :placeholder="field.placeholder || ''"
               :disabled="field.disabled"
-              class="w-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
+              class="form-control w-full"
             />
 
             <!-- Select -->
@@ -49,7 +49,7 @@
               v-else-if="field.type === 'select'"
               v-model="formData[field.prop]"
               :disabled="field.disabled"
-              class="w-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100"
+              class="form-control w-full"
             >
               <option value="" disabled>{{ field.placeholder || 'Pilih...' }}</option>
               <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
@@ -62,19 +62,19 @@
               <button
                 type="button"
                 :class="[
-                  'relative inline-flex h-7 w-12 shrink-0 cursor-pointer border border-border transition-all duration-100',
-                  formData[field.prop] ? 'bg-primary shadow-brutal-sm' : 'bg-muted',
+                  'relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border border-border px-0.5 transition-colors duration-150',
+                  formData[field.prop] ? 'bg-primary' : 'bg-muted',
                 ]"
                 @click="formData[field.prop] = !formData[field.prop]"
               >
                 <span
                   :class="[
-                    'pointer-events-none inline-block h-5 w-5 border border-border bg-background transition-transform',
+                    'pointer-events-none inline-block h-5 w-5 rounded-full border border-border bg-surface transition-transform',
                     formData[field.prop] ? 'translate-x-5' : 'translate-x-0',
                   ]"
                 />
               </button>
-              <span class="text-sm font-bold  text-foreground">
+              <span class="text-sm text-foreground">
                 {{ formData[field.prop] ? 'Ya' : 'Tidak' }}
               </span>
             </div>
@@ -84,7 +84,7 @@
               <div class="flex gap-2">
                 <select
                   v-if="ipScanResults[field.prop]?.length"
-                  class="w-40 rounded-md border border-border bg-background px-2 py-2 text-xs font-mono"
+                  class="form-control w-40 text-xs font-mono"
                   @change="(e) => { formData[field.prop] = e.target.value }"
                 >
                   <option value="">— hasil scan —</option>

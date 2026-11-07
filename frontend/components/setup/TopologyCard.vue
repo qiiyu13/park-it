@@ -9,7 +9,7 @@
     ]"
     @click="$emit('select')"
   >
-    <div class="font-mono text-xl font-bold text-foreground">
+    <div class="font-mono text-xl font-semibold text-foreground">
       {{ inCount }} + {{ outCount }}
     </div>
     <pre class="text-xs leading-tight text-muted-foreground">{{ diagram }}</pre>

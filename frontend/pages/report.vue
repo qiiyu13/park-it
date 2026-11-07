@@ -3,7 +3,7 @@
     <PageHeader title="Laporan" subtitle="Ringkasan transaksi dan settlement e-money." />
 
     <!-- Date filter -->
-    <div class="mb-4 border border-border bg-surface p-4 shadow-brutal">
+    <div class="mb-4 rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
       <div class="mb-3 flex gap-2">
         <Button size="sm" variant="outline" @click="setToday">Hari Ini</Button>
         <Button size="sm" variant="outline" @click="setThisWeek">Minggu Ini</Button>
@@ -11,9 +11,9 @@
         <Button size="sm" variant="outline" @click="setLastMonth">Bulan Lalu</Button>
       </div>
       <div class="flex items-center gap-3">
-        <input v-model="dateFrom" type="date" class="border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
-        <span class="font-bold text-foreground">s/d</span>
-        <input v-model="dateTo" type="date" class="border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-brutal-sm" >
+        <input v-model="dateFrom" type="date" class="form-control" >
+        <span class="text-sm text-muted-foreground">s/d</span>
+        <input v-model="dateTo" type="date" class="form-control" >
         <Button size="sm" :disabled="loading" @click="loadReports">Tampilkan</Button>
       </div>
     </div>
@@ -23,14 +23,14 @@
     <!-- Summary tab -->
     <div v-if="activeTab === 'summary'">
       <div v-if="summaryReport" class="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard label="Total Transaksi" :value="summaryReport.total_transactions.toLocaleString()" />
-        <StatCard label="Total Pendapatan" :value="`Rp ${summaryReport.total_revenue.toLocaleString()}`" />
-        <StatCard label="Pendapatan Cash" :value="`Rp ${summaryReport.cash_revenue.toLocaleString()}`" />
-        <StatCard label="Pendapatan E-Money" :value="`Rp ${summaryReport.emoney_revenue.toLocaleString()}`" />
-        <StatCard label="Pendapatan RFID" :value="`Rp ${summaryReport.rfid_revenue.toLocaleString()}`" />
-        <StatCard label="Tarif Rata-rata" :value="`Rp ${Math.round(summaryReport.average_fee).toLocaleString()}`" />
-        <StatCard label="Transaksi Aktif" :value="summaryReport.active_transactions.toLocaleString()" />
-        <StatCard label="Transaksi Selesai" :value="summaryReport.completed_transactions.toLocaleString()" />
+        <StatCard label="Total Transaksi" :value="summaryReport.total_transactions.toLocaleString('id-ID')" />
+        <StatCard label="Total Pendapatan" :value="formatCurrency(summaryReport.total_revenue)" />
+        <StatCard label="Pendapatan Cash" :value="formatCurrency(summaryReport.cash_revenue)" />
+        <StatCard label="Pendapatan E-Money" :value="formatCurrency(summaryReport.emoney_revenue)" />
+        <StatCard label="Pendapatan RFID" :value="formatCurrency(summaryReport.rfid_revenue)" />
+        <StatCard label="Tarif Rata-rata" :value="formatCurrency(Math.round(summaryReport.average_fee))" />
+        <StatCard label="Transaksi Aktif" :value="summaryReport.active_transactions.toLocaleString('id-ID')" />
+        <StatCard label="Transaksi Selesai" :value="summaryReport.completed_transactions.toLocaleString('id-ID')" />
       </div>
       <div v-else class="py-12 text-center font-medium text-muted-foreground">Pilih rentang tanggal untuk melihat laporan</div>
       <div class="flex gap-2">
@@ -44,13 +44,13 @@
     <div v-if="activeTab === 'shift'">
       <!-- Summary strip -->
       <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div class="border border-border bg-surface p-3 shadow-brutal">
-          <p class="text-xs font-bold  text-muted-foreground">Total Transaksi</p>
-          <p class="text-xl font-bold text-foreground">{{ (shiftReport?.total_transactions ?? 0).toLocaleString('id-ID') }}</p>
+        <div class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
+          <p class="text-xs font-semibold  text-muted-foreground">Total Transaksi</p>
+          <p class="text-xl font-semibold text-foreground">{{ (shiftReport?.total_transactions ?? 0).toLocaleString('id-ID') }}</p>
         </div>
-        <div class="border border-border bg-surface p-3 shadow-brutal">
-          <p class="text-xs font-bold  text-muted-foreground">Total Pendapatan</p>
-          <p class="text-xl font-bold text-foreground">Rp {{ (shiftReport?.total_revenue ?? 0).toLocaleString('id-ID') }}</p>
+        <div class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
+          <p class="text-xs font-semibold  text-muted-foreground">Total Pendapatan</p>
+          <p class="text-xl font-semibold text-foreground">Rp {{ (shiftReport?.total_revenue ?? 0).toLocaleString('id-ID') }}</p>
         </div>
       </div>
       <DataTable
@@ -66,14 +66,14 @@
     <!-- E-Money tab -->
     <div v-if="activeTab === 'emoney'">
       <div v-if="emoneyReport" class="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard label="Transaksi E-Money" :value="emoneyReport.total_emoney_transactions.toLocaleString()" />
-        <StatCard label="Total Deducted" :value="`Rp ${emoneyReport.total_deducted.toLocaleString()}`" />
-        <StatCard label="Berhasil" :value="emoneyReport.success_count.toLocaleString()" variant="success" />
-        <StatCard label="Gagal" :value="emoneyReport.failed_count.toLocaleString()" variant="destructive" />
-        <StatCard label="Lost Contact" :value="emoneyReport.lost_contact_count.toLocaleString()" variant="warning" />
-        <StatCard label="Rata-rata Deduct" :value="`Rp ${Math.round(emoneyReport.average_deduct_amount).toLocaleString()}`" />
-        <StatCard label="Belum Settlement" :value="emoneyReport.unsettled_count.toLocaleString()" />
-        <StatCard label="Sudah Settlement" :value="emoneyReport.settled_count.toLocaleString()" />
+        <StatCard label="Transaksi E-Money" :value="emoneyReport.total_emoney_transactions.toLocaleString('id-ID')" />
+        <StatCard label="Total Deducted" :value="formatCurrency(emoneyReport.total_deducted)" />
+        <StatCard label="Berhasil" :value="emoneyReport.success_count.toLocaleString('id-ID')" variant="success" />
+        <StatCard label="Gagal" :value="emoneyReport.failed_count.toLocaleString('id-ID')" variant="destructive" />
+        <StatCard label="Lost Contact" :value="emoneyReport.lost_contact_count.toLocaleString('id-ID')" variant="warning" />
+        <StatCard label="Rata-rata Deduct" :value="formatCurrency(Math.round(emoneyReport.average_deduct_amount))" />
+        <StatCard label="Belum Settlement" :value="emoneyReport.unsettled_count.toLocaleString('id-ID')" />
+        <StatCard label="Sudah Settlement" :value="emoneyReport.settled_count.toLocaleString('id-ID')" />
       </div>
       <div v-else class="py-12 text-center font-medium text-muted-foreground">Pilih rentang tanggal untuk melihat laporan</div>
     </div>
@@ -87,6 +87,7 @@ import { Button } from '~/components/ui/button'
 definePageMeta({ middleware: 'auth' })
 
 const { fetchApi } = useApi()
+const { formatCurrency } = useFormatters()
 
 const tabs = [
   { key: 'summary', label: 'Ringkasan' },
@@ -171,9 +172,9 @@ const StatCard = {
     variant: { type: String, default: '' },
   },
   template: `
-    <div class="border border-border bg-surface p-4 text-center shadow-brutal">
-      <div class="mb-1 text-xs font-bold  text-muted-foreground">{{ label }}</div>
-      <div :class="['text-xl font-bold font-mono', variantClass]">{{ value }}</div>
+    <div class="rounded-lg border border-border bg-surface p-4 text-center shadow-brutal-sm">
+      <div class="mb-1 text-xs font-semibold  text-muted-foreground">{{ label }}</div>
+      <div :class="['text-xl font-semibold font-mono', variantClass]">{{ value }}</div>
     </div>
   `,
   computed: {

@@ -1,52 +1,52 @@
 <template>
   <Teleport to="body">
     <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" tabindex="-1" @keydown.esc="close">
-      <div class="w-full max-w-3xl border border-border bg-surface p-7 shadow-brutal-lg">
+      <div class="w-full max-w-3xl rounded-xl border border-border bg-surface p-7 shadow-brutal-lg">
         <!-- Header -->
         <div class="flex items-baseline justify-between mb-1">
-          <div class="text-xs  tracking-[0.2em] font-bold text-muted-foreground">MODAL · BAYAR TUNAI</div>
-          <div class="text-xs font-bold text-muted-foreground">F1 dari layar utama</div>
+          <div />
+          <div class="text-xs font-semibold text-muted-foreground">F1 dari layar utama</div>
         </div>
-        <h2 class="text-4xl font-bold  mb-5 leading-none text-foreground">Bayar Tunai</h2>
+        <h2 class="text-4xl font-semibold tracking-tight mb-5 leading-none text-foreground">Bayar Tunai</h2>
 
         <!-- Three tiles: Tagihan / Diterima / Kembali -->
         <div class="grid grid-cols-3 gap-4 mb-6">
-          <div class="border border-border bg-background p-4 shadow-brutal">
-            <div class="text-[11px]  tracking-widest font-bold text-muted-foreground mb-1">Tagihan</div>
-            <div class="text-3xl font-bold tabular-nums text-foreground">{{ formatRp(tariff) }}</div>
+          <div class="rounded-lg border border-border bg-background p-4">
+            <div class="text-xs font-semibold text-muted-foreground mb-1">Tagihan</div>
+            <div class="text-3xl font-semibold tabular-nums text-foreground">{{ formatRp(tariff) }}</div>
           </div>
-          <div class="border border-border bg-primary p-4 shadow-brutal">
-            <div class="text-[11px]  tracking-widest font-bold text-foreground mb-1">Diterima</div>
+          <div class="rounded-lg border border-primary/40 bg-primary/15 p-4">
+            <div class="text-xs font-semibold text-foreground mb-1">Diterima</div>
             <input
               ref="amountInput"
               v-model.number="paidAmount"
               type="number"
               :min="0"
-              class="w-full bg-transparent outline-none text-3xl font-bold tabular-nums text-foreground"
+              class="w-full bg-transparent outline-none text-3xl font-semibold tabular-nums text-foreground"
               placeholder="0"
               @keydown.enter.prevent="onConfirm"
               @keydown.esc.prevent="close"
             >
-            <div class="text-[11px] font-bold text-foreground/70 mt-1">ketik nominal · enter untuk lanjut</div>
+            <div class="text-xs font-medium text-foreground/70 mt-1">ketik nominal · enter untuk lanjut</div>
           </div>
-          <div class="border border-border bg-background p-4 shadow-brutal" :class="{ 'opacity-50': paidAmount < tariff }">
-            <div class="text-[11px]  tracking-widest font-bold text-muted-foreground mb-1">Kembali</div>
-            <div class="text-3xl font-bold tabular-nums text-foreground">{{ formatRp(Math.max(0, paidAmount - tariff)) }}</div>
+          <div class="rounded-lg border border-border bg-background p-4" :class="{ 'opacity-50': paidAmount < tariff }">
+            <div class="text-xs font-semibold text-muted-foreground mb-1">Kembali</div>
+            <div class="text-3xl font-semibold tabular-nums text-foreground">{{ formatRp(Math.max(0, paidAmount - tariff)) }}</div>
           </div>
         </div>
 
         <!-- Denomination shortcuts -->
-        <div class="text-[11px]  tracking-widest font-bold text-muted-foreground mb-2">Shortcut Nominal</div>
+        <div class="text-xs font-semibold text-muted-foreground mb-2">Shortcut Nominal</div>
         <div class="grid grid-cols-7 gap-2 mb-6">
           <button
             v-for="(denom, idx) in denominations"
             :key="denom"
-            class="border border-border bg-background px-2 py-3 text-center shadow-brutal-sm transition-all duration-100   hover:shadow-none"
-            :class="{ 'bg-primary': paidAmount === denom }"
+            class="rounded-md border border-border bg-background px-2 py-3 text-center transition-colors duration-150 hover:bg-surface-hover"
+            :class="{ 'border-primary bg-primary/15': paidAmount === denom }"
             @click="setDenom(denom)"
           >
-            <div class="text-xl font-bold leading-none text-foreground">{{ shortLabel(denom) }}</div>
-            <div class="text-[10px] font-bold text-muted-foreground">«{{ idx + 1 }}»</div>
+            <div class="text-xl font-semibold leading-none text-foreground">{{ shortLabel(denom) }}</div>
+            <div class="text-xs font-medium text-muted-foreground">«{{ idx + 1 }}»</div>
           </button>
         </div>
 
@@ -57,11 +57,11 @@
             <div class="mt-1">setelah Enter, struk dicetak otomatis, layar pindah ke 'buka palang', tekan Space saat kembalian sudah diberikan.</div>
           </div>
           <div class="flex gap-2">
-            <button class="border border-border bg-background px-4 py-2 text-sm font-bold  text-foreground shadow-brutal-sm transition-all duration-100   hover:shadow-none" @click="close">
-              <span class="border border-border bg-muted px-1.5 py-0 mr-1 text-xs font-bold">Esc</span> Batal
+            <button class="pos-btn" @click="close">
+              <kbd class="pos-key">Esc</kbd> Batal
             </button>
-            <button class="border border-border bg-success px-4 py-2 text-sm font-bold  text-white shadow-brutal-sm transition-all duration-100   hover:shadow-none disabled:opacity-40" :disabled="paidAmount < tariff" @click="onConfirm">
-              <span class="border border-border bg-background px-1.5 py-0 mr-1 text-xs font-bold text-foreground">Enter</span> DITERIMA →
+            <button class="pos-btn is-go" :disabled="paidAmount < tariff" @click="onConfirm">
+              <kbd class="pos-key">Enter</kbd> DITERIMA →
             </button>
           </div>
         </div>

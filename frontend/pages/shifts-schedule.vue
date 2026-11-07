@@ -10,7 +10,7 @@
       <input
         v-model="selectedDate"
         type="date"
-        class="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
+        class="form-control"
         @change="loadData"
       >
       <button class="rounded-md border border-border bg-surface px-2 py-1.5 text-sm hover:bg-surface-hover" @click="changeDate(1)">→</button>
@@ -187,7 +187,7 @@
             <label class="block text-xs font-medium text-muted-foreground mb-1">Petugas</label>
             <select
               v-model="assignmentForm.worker_id"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              class="form-control w-full"
             >
               <option :value="null">— Pilih Petugas —</option>
               <option v-for="w in workers" :key="w.id" :value="w.id">{{ w.full_name || w.username }}</option>
@@ -203,7 +203,7 @@
             <label class="block text-xs font-medium text-muted-foreground mb-1">Menggantikan</label>
             <select
               v-model="assignmentForm.original_worker_id"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              class="form-control w-full"
             >
               <option :value="null">— Pilih Petugas Asli —</option>
               <option v-for="w in workers.filter(w => w.id !== assignmentForm.worker_id)" :key="w.id" :value="w.id">{{ w.full_name || w.username }}</option>
@@ -215,7 +215,7 @@
               v-model="assignmentForm.notes"
               type="text"
               maxlength="255"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              class="form-control w-full"
             >
           </div>
         </div>

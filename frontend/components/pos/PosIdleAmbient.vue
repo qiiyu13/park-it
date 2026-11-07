@@ -33,25 +33,25 @@
     <aside class="flex w-96 flex-shrink-0 flex-col gap-3 min-h-0">
       <section>
         <div
-          class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground"
+          class="mb-1.5 flex items-center justify-between text-xs font-mediumr text-muted-foreground"
         >
           <span>Live Exit</span>
-          <span v-if="exitCameraLabel" class="text-muted-foreground/60">{{ exitCameraLabel }}</span>
+          <span v-if="exitCameraLabel" class="text-muted-foreground">{{ exitCameraLabel }}</span>
         </div>
         <CameraColumn :cameras="exitCameras" :placeholder-count="1" />
       </section>
 
       <section>
         <div
-          class="mb-1.5 flex items-center justify-between text-[10px]  tracking-wider text-muted-foreground"
+          class="mb-1.5 flex items-center justify-between text-xs font-mediumr text-muted-foreground"
         >
           <span>Snapshot Masuk</span>
-          <span v-if="lastEntry?.gateLabel" class="text-muted-foreground/60">
+          <span v-if="lastEntry?.gateLabel" class="text-muted-foreground">
             {{ lastEntry.gateLabel }}
           </span>
         </div>
         <div
-          class="w-full aspect-video overflow-hidden rounded-lg border border-border bg-muted/20"
+          class="w-full aspect-video overflow-hidden rounded-lg border border-border bg-muted/40"
         >
           <img
             v-if="lastEntry?.snapshotUrl"
@@ -61,10 +61,10 @@
           >
           <div
             v-else
-            class="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground/20"
+            class="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground"
           >
             <Car class="h-8 w-8" />
-            <span class="text-[10px] font-bold">Belum ada masuk</span>
+            <span class="text-xs font-medium">Belum ada masuk</span>
           </div>
         </div>
         <div
@@ -72,14 +72,14 @@
           class="mt-2 flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 shadow-brutal-sm"
         >
           <div>
-            <div class="font-mono text-sm font-bold tracking-wider text-foreground">
+            <div class="font-mono text-sm font-semibold tracking-wider text-foreground">
               {{ lastEntry.plateNumber }}
             </div>
-            <div class="text-[10px] font-bold  tracking-wide text-muted-foreground">
+            <div class="text-xs font-medium text-muted-foreground">
               {{ lastEntry.subtitle || 'baru saja masuk' }}
             </div>
           </div>
-          <div v-if="lastEntry.ageLabel" class="text-[10px] font-bold tabular-nums text-muted-foreground">
+          <div v-if="lastEntry.ageLabel" class="text-xs font-medium tabular-nums text-muted-foreground">
             {{ lastEntry.ageLabel }}
           </div>
         </div>

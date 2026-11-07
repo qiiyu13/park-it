@@ -52,7 +52,7 @@
                   inputmode="numeric"
                   maxlength="4"
                   placeholder="••••"
-                  class="w-20 rounded border border-border bg-surface px-2 py-1 text-center font-mono text-sm text-foreground focus:border-primary focus:outline-none"
+                  class="form-control h-8 w-20 px-2 text-center font-mono"
                   @keydown.enter="savePin(user.id)"
                   @keydown.escape="cancelPinEdit"
                 >
@@ -117,15 +117,15 @@
         <div class="space-y-3">
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Username</label>
-            <input v-model="form.username" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
+            <input v-model="form.username" type="text" class="form-control w-full" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Nama Lengkap</label>
-            <input v-model="form.full_name" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
+            <input v-model="form.full_name" type="text" class="form-control w-full" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Role</label>
-            <select v-model="form.role" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none">
+            <select v-model="form.role" class="form-control w-full">
               <option value="operator">Operator</option>
               <option value="supervisor">Supervisor</option>
               <option value="admin">Admin</option>
@@ -135,11 +135,11 @@
             <label class="block text-xs font-medium text-muted-foreground mb-1">
               {{ editingUser ? 'Password Baru (kosongkan jika tidak diubah)' : 'Password' }}
             </label>
-            <input v-model="form.password" type="password" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
+            <input v-model="form.password" type="password" class="form-control w-full" >
           </div>
           <div>
             <label class="block text-xs font-medium text-muted-foreground mb-1">Telepon</label>
-            <input v-model="form.phone" type="text" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none" >
+            <input v-model="form.phone" type="text" class="form-control w-full" >
           </div>
           <div>
             <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-muted-foreground">

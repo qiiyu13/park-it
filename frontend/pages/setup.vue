@@ -15,7 +15,7 @@
     <!-- Step: Welcome / Token redeem -->
     <section v-if="step === 'welcome'" class="space-y-6">
       <header class="space-y-2">
-        <h2 class="text-2xl font-bold text-foreground">Selamat datang</h2>
+        <h2 class="text-2xl font-semibold text-foreground">Selamat datang</h2>
         <p class="text-sm text-muted-foreground">
           Ayo siapkan E-Parking. Sekitar 20 menit. Anda butuh: IP controller, jaringan booth PC, dan perangkat keras menyala.
         </p>
@@ -51,7 +51,7 @@
     <!-- Step: Create admin -->
     <section v-else-if="step === 'admin'" class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Buat akun administrator</h2>
+        <h2 class="text-xl font-semibold text-foreground">Buat akun administrator</h2>
         <p class="text-sm text-muted-foreground">
           Akun pertama. Anda bisa menambah operator lain dari menu setelah wizard selesai.
         </p>
@@ -89,7 +89,7 @@
     <div v-else-if="step === 'config'" class="space-y-10">
     <section class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Informasi lokasi</h2>
+        <h2 class="text-xl font-semibold text-foreground">Informasi lokasi</h2>
         <p class="text-sm text-muted-foreground">Muncul di struk dan laporan.</p>
       </header>
 
@@ -121,7 +121,7 @@
 
         <aside class="rounded-lg border border-border bg-background p-4 font-mono text-xs text-foreground">
           <p class="mb-2 text-center text-muted-foreground">— Pratinjau Struk —</p>
-          <p class="text-center text-base font-bold">{{ form.site.name || 'Parkir Anda' }}</p>
+          <p class="text-center text-base font-semibold">{{ form.site.name || 'Parkir Anda' }}</p>
           <p v-if="form.site.address" class="text-center">{{ form.site.address }}</p>
           <p v-if="form.site.city" class="text-center">{{ form.site.city }}</p>
           <p v-if="form.site.phone" class="text-center">Telp. {{ form.site.phone }}</p>
@@ -137,7 +137,7 @@
     <!-- Tariff (presets + table) -->
     <section class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Jenis kendaraan & tarif</h2>
+        <h2 class="text-xl font-semibold text-foreground">Jenis kendaraan & tarif</h2>
         <p class="text-sm text-muted-foreground">
           Pilih preset terdekat, lalu sesuaikan harga di tabel di bawah.
         </p>
@@ -193,7 +193,7 @@
     <!-- Areas -->
     <section class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Area parkir & kapasitas</h2>
+        <h2 class="text-xl font-semibold text-foreground">Area parkir & kapasitas</h2>
         <p class="text-sm text-muted-foreground">
           Setidaknya satu area. Tambah lagi nanti kalau perlu.
         </p>
@@ -229,7 +229,7 @@
     <!-- Step: Topology -->
     <section v-else-if="step === 'topology'" class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Topologi sistem</h2>
+        <h2 class="text-xl font-semibold text-foreground">Topologi sistem</h2>
         <p class="text-sm text-muted-foreground">
           Deteksi otomatis: <span class="font-mono text-foreground">{{ topologyLabel }}</span>.
           Pilih jumlah gate, kami buat baris di database supaya bisa diatur per gate.
@@ -267,7 +267,7 @@
     <!-- Step: Gates -->
     <section v-else-if="step === 'gates'" class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Perangkat per gate</h2>
+        <h2 class="text-xl font-semibold text-foreground">Perangkat per gate</h2>
         <p class="text-sm text-muted-foreground">
           Atur controller dan peripheral untuk setiap gate. Tekan Deteksi untuk
           memetakan perangkat USB otomatis.
@@ -382,7 +382,7 @@
 
     <section v-else-if="step === 'finalize'" class="space-y-5">
       <header class="space-y-1">
-        <h2 class="text-xl font-bold text-foreground">Siap aktifkan</h2>
+        <h2 class="text-xl font-semibold text-foreground">Siap aktifkan</h2>
         <p class="text-sm text-muted-foreground">
           Tinjau konfigurasi, lalu klik "Aktifkan Gate &amp; Selesai" untuk menjalankan
           daemon dan menandai setup selesai.

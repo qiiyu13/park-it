@@ -9,20 +9,20 @@
     <div class="text-center space-y-2">
       <div
         :class="[
-          'mx-auto flex h-16 w-16 items-center justify-center border border-border',
+          'mx-auto flex h-16 w-16 items-center justify-center rounded-xl',
           errorType === 'timeout' ? 'bg-destructive' : 'bg-warning',
         ]"
       >
         <AlertTriangle
           v-if="errorType === 'timeout'"
-          class="h-8 w-8 text-white"
+          class="h-8 w-8 text-on-solid"
         />
         <CreditCard
           v-else
-          class="h-8 w-8 text-foreground"
+          class="h-8 w-8 text-on-solid"
         />
       </div>
-      <div :class="['text-2xl font-bold ', errorType === 'timeout' ? 'text-destructive' : 'text-warning']">
+      <div :class="['text-2xl font-semibold tracking-tight', errorType === 'timeout' ? 'text-destructive' : 'text-warning']">
         {{ title }}
       </div>
       <div class="text-sm font-medium text-muted-foreground max-w-md">{{ description }}</div>
@@ -30,12 +30,12 @@
 
     <!-- Timeout counter -->
     <div v-if="errorType === 'timeout' && waitingSeconds > 0" class="text-center">
-      <div class="text-6xl font-bold text-destructive tabular-nums">{{ waitingSeconds }}s</div>
+      <div class="text-6xl font-semibold text-destructive tabular-nums">{{ waitingSeconds }}s</div>
     </div>
 
     <!-- Plate reminder -->
     <div v-if="plateNumber" class="text-center">
-      <div class="font-mono text-xl font-bold text-muted-foreground tracking-widest">{{ plateNumber }}</div>
+      <div class="font-mono text-xl font-semibold text-muted-foreground tracking-wider">{{ plateNumber }}</div>
     </div>
 
     <!-- Recovery buttons -->

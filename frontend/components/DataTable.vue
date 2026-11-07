@@ -34,7 +34,7 @@
             >
               <button
                 v-if="col.sortable"
-                class="flex items-center gap-1 hover:text-primary"
+                class="flex items-center gap-1 hover:text-foreground"
                 @click="toggleSort(col.prop)"
               >
                 {{ col.label }}
@@ -44,13 +44,13 @@
               </button>
               <span v-else>{{ col.label }}</span>
             </th>
-            <th v-if="showActions" class="w-24 px-4 py-3 text-left font-bold  tracking-wider">Aksi</th>
+            <th v-if="hasActions" class="w-24 px-4 py-3 text-left text-[11px] font-semibold tracking-wider text-muted-foreground">Aksi</th>
           </tr>
         </thead>
         <tbody>
           <!-- Loading state -->
           <tr v-if="loading">
-            <td :colspan="columns.length + (showActions ? 1 : 0)" class="px-4 py-8 text-center text-muted-foreground">
+            <td :colspan="columns.length + (hasActions ? 1 : 0)" class="px-4 py-8 text-center text-muted-foreground">
               <div class="flex items-center justify-center gap-2">
                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 12a9 9 0 11-6.219-8.56" />
@@ -62,7 +62,7 @@
 
           <!-- Empty state -->
           <tr v-else-if="displayedData.length === 0">
-            <td :colspan="columns.length + (showActions ? 1 : 0)" class="px-4 py-8 text-center text-muted-foreground">
+            <td :colspan="columns.length + (hasActions ? 1 : 0)" class="px-4 py-8 text-center text-muted-foreground">
               Tidak ada data
             </td>
           </tr>
@@ -71,7 +71,7 @@
           <tr
             v-for="(row, idx) in displayedData"
             :key="idx"
-            class="border-b border-border last:border-0 hover:bg-primary/20 transition-colors"
+            class="border-b border-border last:border-0 hover:bg-surface-hover transition-colors"
           >
             <td
               v-for="col in columns"
@@ -79,23 +79,14 @@
               class="px-4 py-3 font-medium text-foreground"
             >
               <!-- Boolean type -->
-              <span
-                v-if="col.type === 'boolean'"
-                :class="[
-                  'inline-flex border border-border px-2 py-0.5 text-xs font-bold  shadow-brutal-sm',
-                  row[col.prop] ? 'bg-success text-white' : 'bg-muted text-muted-foreground',
-                ]"
-              >
+              <Badge v-if="col.type === 'boolean'" :variant="row[col.prop] ? 'success' : 'secondary'">
                 {{ row[col.prop] ? 'Ya' : 'Tidak' }}
-              </span>
+              </Badge>
 
               <!-- Enum type -->
-              <span
-                v-else-if="col.type === 'enum'"
-                class="inline-flex border border-border bg-primary px-2 py-0.5 text-xs font-bold  shadow-brutal-sm"
-              >
-                {{ row[col.prop] }}
-              </span>
+              <Badge v-else-if="col.type === 'enum'" :variant="enumBadge(row[col.prop]).variant">
+                {{ enumBadge(row[col.prop]).label }}
+              </Badge>
 
               <!-- Custom formatter -->
               <span v-else-if="col.formatter">
@@ -107,30 +98,36 @@
             </td>
 
             <!-- Actions -->
-            <td v-if="showActions" class="px-4 py-3">
+            <td v-if="hasActions" class="px-4 py-3">
               <div class="flex items-center gap-1">
                 <slot name="row-actions" :row="row" />
-                <button
+                <Button
                   v-if="showEdit"
-                  class="border border-transparent p-1.5 text-muted-foreground transition-all hover:border-border hover:bg-primary hover:text-foreground hover:shadow-brutal-sm"
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground"
                   title="Edit"
+                  aria-label="Edit"
                   @click="$emit('edit', row)"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
-                </button>
-                <button
+                </Button>
+                <Button
                   v-if="showDelete"
-                  class="border border-transparent p-1.5 text-muted-foreground transition-all hover:border-border hover:bg-destructive hover:text-white hover:shadow-brutal-sm"
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title="Hapus"
+                  aria-label="Hapus"
                   @click="$emit('delete', row)"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
-                </button>
+                </Button>
               </div>
             </td>
           </tr>
@@ -146,7 +143,8 @@
       <div class="flex items-center gap-1">
         <select
           v-model="currentPageSize"
-          class="border border-border bg-surface px-2 py-1 text-sm font-medium text-foreground shadow-brutal-sm"
+          class="form-control h-8 px-2"
+          aria-label="Baris per halaman"
           @change="handleSizeChange"
         >
           <option v-for="s in pageSizes" :key="s" :value="s">{{ s }}</option>
@@ -174,9 +172,31 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, useSlots } from 'vue'
+import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
+
+// Backend status values (transactions, settlements, e-money). Anything else,
+// such as IN/OUT or connection types, is plain data and stays neutral.
+const ENUM_BADGES = {
+  ACTIVE: { variant: 'info', label: 'Aktif' },
+  COMPLETED: { variant: 'success', label: 'Selesai' },
+  SUCCESS: { variant: 'success', label: 'Sukses' },
+  LOST_CONTACT: { variant: 'warning', label: 'Lost Contact' },
+  TIMEOUT: { variant: 'warning', label: 'Timeout' },
+  FAILED: { variant: 'destructive', label: 'Gagal' },
+  CORRECTION_FAILED: { variant: 'destructive', label: 'Koreksi Gagal' },
+  GENERATED: { variant: 'secondary', label: 'Dibuat' },
+  UPLOADED: { variant: 'info', label: 'Terkirim' },
+  ACKED_OK: { variant: 'success', label: 'Diterima' },
+  ACKED_NOK: { variant: 'destructive', label: 'Ditolak' },
+  PARTIAL: { variant: 'warning', label: 'Sebagian' },
+}
+
+function enumBadge(value) {
+  return ENUM_BADGES[value] ?? { variant: 'secondary', label: value ?? '-' }
+}
 
 const props = defineProps({
   data: { type: Array, default: () => [] },
@@ -193,6 +213,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['add', 'edit', 'delete', 'page-change', 'size-change', 'search'])
+
+const slots = useSlots()
+// Read-only tables have nothing to put in the column, so drop it.
+const hasActions = computed(() =>
+  props.showActions && (props.showEdit || props.showDelete || !!slots['row-actions']),
+)
 
 const searchQuery = ref('')
 const currentPage = ref(1)

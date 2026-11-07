@@ -81,7 +81,7 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
               @click="incomingWorker = w; focusIncomingPin()"
             >
               <div class="pos-display text-lg leading-none truncate">{{ w.full_name || w.username }}</div>
-              <div class="text-[10px] pos-label text-muted-foreground truncate">{{ w.shift_name || w.role }}</div>
+              <div class="text-xs pos-label text-muted-foreground truncate">{{ w.shift_name || w.role }}</div>
             </button>
             <div v-if="!availableWorkers.length" class="col-span-4 py-4 text-center pos-body text-sm text-muted-foreground">
               Tidak ada petugas lain tersedia.

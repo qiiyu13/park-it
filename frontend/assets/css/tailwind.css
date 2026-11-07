@@ -32,6 +32,7 @@
   --color-sidebar-foreground: var(--sidebar-fg);
   --color-sidebar-muted: var(--sidebar-muted);
   --color-focus: var(--focus-ring);
+  --color-on-solid: var(--fg-on-solid);
 
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -66,6 +67,7 @@
 
   --color-accent-primary: oklch(0.825 0.145 84); /* safety amber */
   --fg-on-primary: oklch(0.225 0.02 255);
+  --fg-on-solid: #fff; /* text on success/danger/e-money fills */
   --color-accent-pink: oklch(0.62 0.16 350);
   --color-accent-blue: oklch(0.53 0.16 255);
   --color-accent-green: oklch(0.52 0.13 152);
@@ -90,9 +92,11 @@
   --focus-ring: oklch(0.78 0.14 84);
 
   --shadow-color: oklch(0 0 0 / 0.45);
+  color-scheme: dark;
 
   --color-accent-primary: oklch(0.805 0.145 84);
   --fg-on-primary: oklch(0.200 0.02 255);
+  --fg-on-solid: oklch(0.180 0.014 255); /* dark-theme fills are light */
   --color-accent-pink: oklch(0.70 0.14 350);
   --color-accent-blue: oklch(0.68 0.13 255);
   --color-accent-green: oklch(0.68 0.12 152);
@@ -171,6 +175,34 @@
  * POS worker dialogs — same industrial language as the rest of the product.
  * ------------------------------------------------------------------------- */
 @layer components {
+  /* Native input/select/textarea, matching ui/input. Utilities can still resize it. */
+  .form-control {
+    height: 2.5rem;
+    padding: 0 0.75rem;
+    background: var(--bg-surface);
+    color: var(--bg-foreground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  textarea.form-control {
+    height: auto;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .form-control:focus-visible {
+    border-color: var(--focus-ring);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent);
+  }
+
+  .form-control:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
   .pos-modal-backdrop {
     background: oklch(0.14 0.015 255 / 0.55);
     backdrop-filter: blur(3px);
@@ -223,9 +255,9 @@
   }
 
   .pos-choice.is-active {
-    background: color-mix(in oklch, var(--color-accent-primary) 20%, var(--bg-surface));
+    background: color-mix(in srgb, var(--color-accent-primary) 20%, var(--bg-surface));
     border-color: var(--color-accent-primary);
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-accent-primary) 35%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-primary) 35%, transparent);
   }
 
   .pos-pin {
@@ -251,7 +283,7 @@
 
   .pos-pin.is-current {
     border-color: var(--color-accent-primary);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent-primary) 30%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-primary) 30%, transparent);
   }
 
   .pos-input {
@@ -265,11 +297,12 @@
 
   .pos-input:focus {
     border-color: var(--color-accent-primary);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent-primary) 25%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-primary) 25%, transparent);
   }
 
   .pos-btn {
     display: inline-flex;
+    white-space: nowrap;
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
@@ -297,7 +330,7 @@
   .pos-btn.is-go {
     background: var(--color-accent-green);
     border-color: var(--color-accent-green);
-    color: #fff;
+    color: var(--fg-on-solid);
   }
 
   .pos-btn.is-primary {
@@ -309,7 +342,7 @@
   .pos-btn.is-danger {
     background: var(--color-accent-red);
     border-color: var(--color-accent-red);
-    color: #fff;
+    color: var(--fg-on-solid);
   }
 
   .pos-key {
@@ -347,6 +380,6 @@
   .pos-step.is-done {
     background: var(--color-accent-green);
     border-color: var(--color-accent-green);
-    color: #fff;
+    color: var(--fg-on-solid);
   }
 }

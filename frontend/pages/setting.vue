@@ -7,35 +7,35 @@
     <!-- Site Info -->
     <div v-if="activeTab === 'site-info'" class="max-w-xl space-y-4">
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">Site Name</label>
+        <label class="text-sm font-semibold text-foreground">Site Name</label>
         <Input v-model="siteConfig.name" placeholder="Parking Mall ABC" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">Address</label>
-        <textarea v-model="siteConfig.address" rows="2" class="w-full border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100" />
+        <label class="text-sm font-semibold text-foreground">Address</label>
+        <textarea v-model="siteConfig.address" rows="2" class="form-control w-full" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">City</label>
+        <label class="text-sm font-semibold text-foreground">City</label>
         <Input v-model="siteConfig.city" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">Phone</label>
+        <label class="text-sm font-semibold text-foreground">Phone</label>
         <Input v-model="siteConfig.phone" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">Email</label>
+        <label class="text-sm font-semibold text-foreground">Email</label>
         <Input v-model="siteConfig.email" />
       </div>
       <div class="space-y-2">
-        <label class="text-sm font-bold  tracking-wide text-foreground">Tax ID (NPWP)</label>
+        <label class="text-sm font-semibold text-foreground">Tax ID (NPWP)</label>
         <Input v-model="siteConfig.tax_id" />
       </div>
       <Button @click="saveSiteConfig">Save</Button>
 
       <div class="border-t border-border pt-4">
-        <h3 class="mb-2 text-sm font-bold  tracking-wide text-foreground">Receipt Preview</h3>
-        <div class="border border-border bg-surface p-4 text-center shadow-brutal">
-          <div class="text-base font-bold  text-foreground">{{ siteConfig.name || 'E-Parking' }}</div>
+        <h3 class="mb-2 text-sm font-semibold text-foreground">Receipt Preview</h3>
+        <div class="rounded-lg border border-border bg-surface p-4 text-center shadow-brutal-sm">
+          <div class="text-base font-semibold  text-foreground">{{ siteConfig.name || 'E-Parking' }}</div>
           <div class="text-xs font-medium text-muted-foreground">{{ siteConfig.address }}</div>
           <div class="text-xs font-medium text-muted-foreground">{{ siteConfig.city }} | {{ siteConfig.phone }}</div>
         </div>
@@ -55,7 +55,7 @@
           <div class="px-3 py-2 font-mono text-sm font-medium text-foreground">{{ row.key }}</div>
           <div class="px-3 py-2 text-sm font-medium text-foreground">{{ row.label }}</div>
           <div class="px-3 py-2">
-            <input v-model="row.value" class="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground transition-colors focus:border-[color:var(--focus-ring)] focus:outline-none focus:ring-2 focus:ring-[color:var(--focus-ring)]/20" @blur="saveSetting(row)" >
+            <input v-model="row.value" class="form-control w-full" @blur="saveSetting(row)" >
           </div>
           <div class="px-3 py-2">
             <span class="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{{ row.group }}</span>
@@ -102,23 +102,19 @@
             <tr v-else-if="gateOutList.length === 0" class="border-t border-border">
               <td colspan="5" class="px-3 py-4 text-center text-muted-foreground text-xs font-medium">Tidak ada gate keluar</td>
             </tr>
-            <tr v-for="gate in gateOutList" :key="gate.id" class="border-t border-border hover:bg-primary/20">
-              <td class="px-3 py-2 font-bold text-foreground">{{ gate.name }}</td>
+            <tr v-for="gate in gateOutList" :key="gate.id" class="border-t border-border hover:bg-surface-hover">
+              <td class="px-3 py-2 font-semibold text-foreground">{{ gate.name }}</td>
               <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{{ gate.code }}</td>
               <td class="px-3 py-2">
-                <span
-:class="[
-                  'border border-border px-2 py-0.5 text-xs font-bold  shadow-brutal-sm',
-                  gate.hardware_config?.lane_type === 'SINGLE' ? 'bg-primary text-foreground' : 'bg-warning text-foreground'
-                ]">
+                <Badge :variant="gate.hardware_config?.lane_type === 'SINGLE' ? 'secondary' : 'warning'">
                   {{ gate.hardware_config?.lane_type === 'SINGLE' ? 'Single' : 'Campuran' }}
-                </span>
+                </Badge>
               </td>
               <td class="px-3 py-2 font-medium text-muted-foreground">
                 {{ getVehicleTypeName(gate.hardware_config?.default_vehicle_type_id) || '—' }}
               </td>
               <td class="px-3 py-2 text-right">
-                <button class="border border-border bg-primary px-2 py-1 text-xs font-bold  text-foreground shadow-brutal-sm   hover:shadow-none transition-all duration-100" @click="openGateLaneModal(gate)">Edit</button>
+                <Button variant="outline" size="sm" @click="openGateLaneModal(gate)">Edit</Button>
               </td>
             </tr>
           </tbody>
@@ -133,7 +129,7 @@
           </DialogHeader>
 
           <div class="space-y-2">
-            <label class="text-sm font-bold  tracking-wide text-foreground">Jenis Lajur</label>
+            <label class="text-sm font-semibold text-foreground">Jenis Lajur</label>
             <div class="flex gap-3">
               <label v-for="opt in laneTypeOptions" :key="opt.value" class="flex items-center gap-2 cursor-pointer">
                 <input v-model="gateLaneForm.lane_type" type="radio" :value="opt.value" class="accent-primary" >
@@ -147,8 +143,8 @@
           </div>
 
           <div v-if="gateLaneForm.lane_type === 'SINGLE'" class="space-y-2">
-            <label class="text-sm font-bold  tracking-wide text-foreground">Jenis Kendaraan Default</label>
-            <select v-model.number="gateLaneForm.default_vehicle_type_id" class="w-full border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:shadow-brutal-sm focus:translate-x-[2px] focus:translate-y-[2px] transition-all duration-100">
+            <label class="text-sm font-semibold text-foreground">Jenis Kendaraan Default</label>
+            <select v-model.number="gateLaneForm.default_vehicle_type_id" class="form-control w-full">
               <option :value="null">— Pilih jenis —</option>
               <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }} ({{ vt.code }})</option>
             </select>
@@ -174,6 +170,7 @@
 
 <script setup>
 import { toast } from 'vue-sonner'
+import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '~/components/ui/dialog'
@@ -181,6 +178,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 definePageMeta({ middleware: 'auth' })
 
 const { fetchApi } = useApi()
+const { formatCurrency } = useFormatters()
 const vtCrud = useCrud('/api/vehicle-types', { label: 'Jenis Kendaraan' })
 const shiftCrud = useCrud('/api/shifts', { label: 'Shift' })
 const areaCrud = useCrud('/api/areas', { label: 'Area Parkir' })
@@ -208,9 +206,9 @@ const vehicleTypeForm = ref({})
 const vehicleTypeColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
   { prop: 'code', label: 'Kode', width: 100, sortable: true },
-  { prop: 'base_tariff', label: 'Tarif Dasar', width: 120, formatter: (v) => `Rp ${v?.toLocaleString()}` },
-  { prop: 'hourly_rate', label: 'Tarif/jam', width: 120, formatter: (v) => `Rp ${v?.toLocaleString()}` },
-  { prop: 'max_daily_cap', label: 'Maks Harian', width: 120, formatter: (v) => `Rp ${v?.toLocaleString()}` },
+  { prop: 'base_tariff', label: 'Tarif Dasar', width: 120, formatter: (v) => formatCurrency(v) },
+  { prop: 'hourly_rate', label: 'Tarif/jam', width: 120, formatter: (v) => formatCurrency(v) },
+  { prop: 'max_daily_cap', label: 'Maks Harian', width: 120, formatter: (v) => formatCurrency(v) },
   { prop: 'is_progressive', label: 'Progresif', type: 'boolean', width: 100 },
 ]
 const vehicleTypeFields = [

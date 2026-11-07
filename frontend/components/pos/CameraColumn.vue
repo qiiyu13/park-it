@@ -5,11 +5,11 @@
       <div
         v-for="n in placeholderCount"
         :key="`skeleton-${n}`"
-        class="w-full aspect-video relative overflow-hidden rounded-lg border border-border/20 bg-muted/10"
+        class="w-full aspect-video relative overflow-hidden rounded-lg border border-border bg-muted/40"
       >
         <div class="w-full h-full flex flex-col items-center justify-center gap-2">
-          <Camera class="h-8 w-8 text-muted-foreground/15" />
-          <span class="text-[10px] text-muted-foreground/20">Kamera {{ n }}</span>
+          <Camera class="h-8 w-8 text-muted-foreground/60" />
+          <span class="text-xs text-muted-foreground">Kamera {{ n }}</span>
         </div>
       </div>
     </template>
@@ -30,14 +30,14 @@
         >
         <div
           v-else
-          class="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground/20"
+          class="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground"
         >
           <CameraOff class="h-8 w-8" />
           <span class="text-xs">Tidak ada sinyal</span>
         </div>
         <div
           v-if="cam.label"
-          class="absolute bottom-1.5 left-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded"
+          class="absolute bottom-1.5 left-1.5 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded"
         >
           {{ cam.label }}
         </div>
