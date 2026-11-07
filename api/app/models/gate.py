@@ -73,21 +73,15 @@ class Gate(Base, IntPKMixin, TimestampMixin):
         return self.get_peripheral(key).get("enabled", False)
 
     def get_cameras(self) -> list[dict]:
-        """Return active camera configs. Supports cameras[] array and legacy camera.url."""
-        cameras = self.hardware_config.get("cameras", [])
-        if cameras:
-            return [
-                {
-                    "url": c["url"],
-                    "label": c.get("label"),
-                    "username": c.get("username"),
-                    "password": c.get("password"),
-                    "auth_type": c.get("auth_type", "none"),
-                }
-                for c in cameras
-                if c.get("url") and c.get("enabled", True)
-            ]
-        cam = self.hardware_config.get("camera", {})
-        if cam.get("enabled", False) and cam.get("url"):
-            return [{"url": cam["url"], "label": None, "username": None, "password": None, "auth_type": "none"}]
-        return []
+        """Return active camera configs from the ``cameras[]`` array."""
+        return [
+            {
+                "url": c["url"],
+                "label": c.get("label"),
+                "username": c.get("username"),
+                "password": c.get("password"),
+                "auth_type": c.get("auth_type", "none"),
+            }
+            for c in self.hardware_config.get("cameras", [])
+            if c.get("url") and c.get("enabled", True)
+        ]

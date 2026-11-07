@@ -15,15 +15,16 @@ fi
 
 echo "=== E-Parking v2 Development Start ==="
 
-# 1. Start infrastructure
-echo "[1/5] Starting PostgreSQL, Redis, pgBouncer..."
+# 1. Start infrastructure (single compose file: docker/docker-compose.prod.yml)
+echo "[1/5] Starting PostgreSQL and Redis..."
 cd "$PROJECT_ROOT"
-docker compose up -d postgres redis pgbouncer
+COMPOSE_FILE=docker/docker-compose.prod.yml
+docker compose -f "$COMPOSE_FILE" up -d postgres redis
 
 # Wait for PostgreSQL
 echo "[2/5] Waiting for PostgreSQL..."
 for i in {1..30}; do
-    if docker compose exec -T postgres pg_isready -U parking -d parking >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U parking -d parking >/dev/null 2>&1; then
         echo "  PostgreSQL is ready!"
         break
     fi

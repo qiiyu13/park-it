@@ -1,9 +1,13 @@
 """Development seed script.
 
+Seeds demo users, gates, shifts, a member and a vehicle type. Never run on a
+production install: it refuses to start when APP_ENV=production.
+
 Usage:
     python scripts/seed.py
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -157,15 +161,16 @@ async def seed() -> None:
         await session.flush()
         print(f"  Created member: {member.name} (card={member.card_number})")
 
-        # Gate-in (unified Gate model)
+        # Gate-in (unified Gate model). Demo controllers default to loopback so a
+        # dev seed can never point at real hardware on the LAN.
         gate_in = Gate(
             name="Gate Masuk Utama",
             code="GIN01",
             direction="IN",
             area_parkir_id=area.id,
             protocol="compass",
-            controller_host="192.168.1.101",
-            controller_port=5000,
+            controller_host=os.getenv("SEED_GATE_IN_HOST", "127.0.0.1"),
+            controller_port=int(os.getenv("SEED_GATE_IN_PORT", "5000")),
             has_close_sensor=True,
             gate_close_duration_ms=5000,
             gate_open_timeout_s=30,
@@ -177,7 +182,7 @@ async def seed() -> None:
                 "open_command": "TRIG1",
                 "pulse_duration_ms": 1000,
                 "ticket_printer": {"enabled": True, "printer_name": "Printer-Gate-In"},
-                "camera": {"enabled": True, "camera_url": "rtsp://192.168.1.201/stream"},
+                "cameras": [],
                 "audio": {"enabled": True, "module": "compass"},
                 "led": {"enabled": True, "module": "compass"},
             },
@@ -195,8 +200,8 @@ async def seed() -> None:
             direction="OUT",
             area_parkir_id=area.id,
             protocol="compass",
-            controller_host="192.168.1.102",
-            controller_port=5000,
+            controller_host=os.getenv("SEED_GATE_OUT_HOST", "127.0.0.1"),
+            controller_port=int(os.getenv("SEED_GATE_OUT_PORT", "5000")),
             has_close_sensor=True,
             gate_close_duration_ms=5000,
             gate_open_timeout_s=30,
@@ -206,7 +211,7 @@ async def seed() -> None:
                 "open_command": "TRIG1",
                 "pulse_duration_ms": 1000,
                 "receipt_printer": {"enabled": True, "printer_name": "Printer-Gate-Out"},
-                "camera": {"enabled": True, "camera_url": "rtsp://192.168.1.202/stream"},
+                "cameras": [],
                 "audio": {"enabled": True, "module": "compass"},
                 "led": {"enabled": True, "module": "compass"},
             },
@@ -225,4 +230,8 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
+    from shared.config import get_settings
+
+    if get_settings().app_env == "production":
+        sys.exit("Refusing to seed demo data with APP_ENV=production")
     asyncio.run(seed())

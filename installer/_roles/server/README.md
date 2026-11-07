@@ -54,7 +54,8 @@ The script will interactively prompt you for:
 - Database: `parking`
 - User: `parking`
 - Migrations applied automatically
-- Seeding is **not** done automatically (run `seed.py` manually if desired)
+- Seeding is **not** done automatically. `scripts/seed.py` is development-only
+  and refuses to run when `APP_ENV=production` (demo users/gates with default passwords)
 
 ### Systemd Services
 | Service | Purpose |

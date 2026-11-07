@@ -48,7 +48,7 @@ Automated parking management system with real-time hardware control, multi-payme
 | **Task Queue** | ARQ (Critical + Background workers with cron) |
 | **Hardware** | Compass, ENET, PASSTI, ESC/POS, Serial RS-232 |
 | **Observability** | structlog (JSON, trace_id), Prometheus metrics |
-| **Containerization** | Docker Compose (dev + prod) |
+| **Containerization** | Docker Compose (prod: `docker/docker-compose.prod.yml`) |
 | **Process Mgmt** | systemd (5 service units) |
 
 ## Quick Start
@@ -62,8 +62,8 @@ pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env with your settings
 
-# 3. Start infrastructure (PostgreSQL, Redis, pgBouncer)
-docker compose up -d
+# 3. Start infrastructure (PostgreSQL, Redis)
+docker compose -f docker/docker-compose.prod.yml up -d postgres redis
 
 # 4. Run migrations and seed data
 alembic upgrade head
@@ -146,7 +146,6 @@ parking-system-v2/
 │   ├── redis.py            # Async Redis client (singleton)
 │   ├── events.py           # Redis IPC message schemas
 │   └── logging.py          # structlog + trace_id binding
-├── services/               # Machine vision (ANPR, YOLOv8)
 ├── docker/                 # Dockerfiles & nginx config
 ├── systemd/                # systemd service units
 ├── scripts/                # Seed, deploy, benchmarks
