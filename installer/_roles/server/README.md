@@ -42,7 +42,7 @@ The script will interactively prompt you for:
 - `redis-server` — Cache, pub/sub, streams
 - `nginx` — Reverse proxy
 - `python3.12` + venv — Runtime
-- `nodejs` 20 + npm — Frontend build
+- `nodejs` 22 + npm — Frontend build
 - `google-chrome-stable` — For kiosk mode on server-as-booth setups
 
 ### Application

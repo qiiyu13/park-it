@@ -32,8 +32,8 @@ tests/            E2E, smoke, load tests
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env          # edit with your credentials
-docker compose up -d           # PostgreSQL + Redis
-cd api && alembic upgrade head
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d postgres redis
+alembic upgrade head          # run from repo root (alembic.ini lives here)
 uvicorn api.app.main:app --reload
 
 # Frontend (separate terminal)
@@ -47,9 +47,9 @@ cd frontend && npm install && npm run dev
 
 ```bash
 # Backend
-cd api && alembic upgrade head              # apply migrations
-cd api && alembic revision -m "description" # create migration
-cd api && alembic downgrade -1              # rollback one
+alembic upgrade head              # apply migrations (from repo root)
+alembic revision -m "description" # create migration
+alembic downgrade -1              # rollback one
 pytest                                       # run all tests (api, workers, protocols, daemons)
 ruff check .                                 # lint
 mypy .                                       # type check

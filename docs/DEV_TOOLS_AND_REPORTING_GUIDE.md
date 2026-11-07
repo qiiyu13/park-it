@@ -416,14 +416,14 @@ GET /api/reports/summary/export?format=pdf&date_from=2026-04-01&date_to=2026-04-
 **Fix:**
 ```bash
 # Check Docker status
-docker compose ps
+docker compose --env-file .env -f docker/docker-compose.prod.yml ps
 
 # Restart containers manually
-docker compose down
-docker compose up -d postgres redis pgbouncer
+docker compose --env-file .env -f docker/docker-compose.prod.yml down
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d postgres redis
 
 # Check PostgreSQL logs
-docker compose logs postgres
+docker compose --env-file .env -f docker/docker-compose.prod.yml logs postgres
 ```
 
 **Issue:** Port 8000 or 3000 already in use
@@ -507,8 +507,8 @@ sudo systemctl daemon-reload
 
 **Fix:**
 ```bash
-# Check if migration ran
-cd api && alembic current
+# Check if migration ran (run from repo root)
+alembic current
 
 # Apply migration if needed
 alembic upgrade head

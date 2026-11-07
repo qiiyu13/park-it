@@ -12,7 +12,11 @@ COPY frontend/ .
 ENV NUXT_PUBLIC_API_BASE_URL=""
 ENV NUXT_PUBLIC_WS_BASE_URL=""
 ENV NUXT_PUBLIC_BOOTH_BRIDGE_URL=""
-RUN npm run build
+# Static container: nginx serves .output/public. `nuxt build` (SSR) produces
+# only a Nitro server bundle — no index.html — so nginx returned 403 for every
+# route. `generate` emits the SPA shell as 200.html; copy it to index.html for
+# nginx's try_files fallback.
+RUN npm run generate && cp .output/public/200.html .output/public/index.html
 
 # Production: serve static via nginx
 FROM nginx:alpine

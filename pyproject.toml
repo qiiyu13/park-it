@@ -61,8 +61,10 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0.0",
-    "ruff>=0.6.0",
-    "mypy>=1.11.0",
+    # Pinned: new ruff/mypy minors add lint rules and type checks that have
+    # broken CI on unrelated commits before.
+    "ruff==0.17.4",
+    "mypy==2.4.1",
 ]
 
 [tool.ruff]

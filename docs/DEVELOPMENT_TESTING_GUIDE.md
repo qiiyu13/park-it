@@ -58,11 +58,11 @@ E-Parking v2 uses a **9-level testing pyramid** before any code reaches producti
 ### Required Services
 
 ```bash
-# Start PostgreSQL, Redis, pgBouncer
-docker compose up -d
+# Start PostgreSQL and Redis
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d postgres redis
 
 # Verify services are healthy
-docker compose ps
+docker compose --env-file .env -f docker/docker-compose.prod.yml ps
 ```
 
 ### Python Environment
@@ -480,7 +480,7 @@ python scripts/test_booth_ws.py --port 5679
 
 ```bash
 # Ensure full stack is running
-docker compose up -d
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
 
 # Seed test data
 python scripts/seed.py
@@ -661,7 +661,7 @@ pip install -e ".[dev]"
 **"Connection refused" in E2E tests:**
 ```bash
 # Ensure database is running
-docker compose up -d postgres
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d postgres
 ```
 
 **Frontend build errors:**

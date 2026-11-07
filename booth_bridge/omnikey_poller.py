@@ -232,11 +232,10 @@ class OmnikeyPoller:
                     if keycode in _DIGIT_KEYS:
                         buffer.append(_DIGIT_KEYS[keycode])
                         last_digit_at = time.monotonic()
-                    elif keycode in _ENTER_KEYS:
-                        if buffer:
-                            await self._flush_buffer(buffer)
-                            buffer = []
-                            last_digit_at = None
+                    elif keycode in _ENTER_KEYS and buffer:
+                        await self._flush_buffer(buffer)
+                        buffer = []
+                        last_digit_at = None
             except OSError as e:
                 logger.warning("omnikey_device_disconnected", error=str(e))
             except Exception as e:

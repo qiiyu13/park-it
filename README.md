@@ -63,7 +63,7 @@ cp .env.example .env
 # Edit .env with your settings
 
 # 3. Start infrastructure (PostgreSQL, Redis)
-docker compose -f docker/docker-compose.prod.yml up -d postgres redis
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d postgres redis
 
 # 4. Run migrations and seed data
 alembic upgrade head
@@ -175,14 +175,17 @@ mypy .
 
 ```bash
 # Production Docker Compose
-docker compose -f docker/docker-compose.prod.yml up -d
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
+
+# Apply schema migrations — required on a fresh database, the API does not
+# migrate itself.
+docker compose --env-file .env -f docker/docker-compose.prod.yml \
+  exec -T api alembic upgrade head
 
 # Or with systemd
-sudo systemctl start parking-api
+sudo systemctl start parking-api parking-frontend parking-events
 sudo systemctl start parking-daemon-gate-in@GIN-01   # entry gates only; exit lanes use booth-bridge
-sudo systemctl start parking-worker-critical
-sudo systemctl start parking-worker-snapshot
-sudo systemctl start parking-worker-bg
+sudo systemctl start parking-worker-critical parking-worker-bg
 ```
 
 ### Multi-PC (Server + Booths)

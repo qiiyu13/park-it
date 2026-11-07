@@ -203,9 +203,9 @@ apt-get install -y -qq \
     curl wget git unzip rsync \
     ffmpeg
 
-# Node.js 20
+# Node.js 22 (matches CI and the frontend Docker image)
 if ! command -v node &>/dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y -qq nodejs
 fi
 ok "Node.js $(node -v) installed"
@@ -410,6 +410,19 @@ for svc in "${services[@]}"; do
     systemctl start "$svc"
     ok "${svc} installed and started"
 done
+
+# Template unit for entry-gate daemons. Instances are enabled per gate by
+# scripts/enable-gate-daemons.sh once the gates exist in the database.
+cp "$PROJECT_ROOT/systemd/parking-daemon-gate-in@.service" /etc/systemd/system/
+ok "Gate daemon template installed"
+
+# Nightly PostgreSQL backup (oneshot service triggered by the timer). The unit
+# uses StateDirectory= so the backup directory is created with the right owner.
+cp "$PROJECT_ROOT/systemd/parking-backup.service" /etc/systemd/system/
+cp "$PROJECT_ROOT/systemd/parking-backup.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now parking-backup.timer
+ok "Nightly backup timer installed and started"
 
 # Create app data directories
 mkdir -p /var/lib/parking/{snapshots,settlements,logs}
