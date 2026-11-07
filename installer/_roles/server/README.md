@@ -19,19 +19,22 @@
 ## Quick Start
 
 ```bash
-# 1. Clone the repository
-git clone <repo-url> /tmp/parking-system-v2
-cd /tmp/parking-system-v2/installer/server
+# 1. Get the project (USB copy or git clone) and enter its root
+cd parking-system-v2
 
-# 2. Run the installer (requires root)
-sudo ./setup.sh
+# 2. Run the installer from the ROOT (requires root)
+sudo ./install.sh              # defaults, no questions
+# or
+sudo ./install.sh --advanced   # asks the questions below, then opens the wizard
 ```
 
-The script will interactively prompt you for:
+`--advanced` asks for:
 - **Server IP** — used for CORS and booth shortcuts
 - **PostgreSQL password** — for the `parking` DB user
 - **JWT secret** — used for token signing (auto-generated if blank)
 - **Git repository URL** — source code location
+
+`./install.sh` is the entry point. Do not run `./setup.sh` inside `_roles/`.
 
 ---
 
@@ -76,6 +79,14 @@ The script will interactively prompt you for:
 
 ## Post-Installation
 
+> **Which mode did you install?**
+> `sudo ./install.sh` (quick) already created the admin, site, areas and gates
+> and **skipped the wizard** — jump to *1. Verify Services* and log in with the
+> credentials from `/etc/parking/install-notes.txt`.
+> `sudo ./install.sh --advanced` ends with a browser wizard link
+> (`/setup?token=…`, token also in `/etc/parking/setup-token`) where you create
+> the same data by hand.
+
 ### 1. Verify Services
 
 ```bash
@@ -87,9 +98,11 @@ sudo systemctl status nginx
 
 ### 2. Configure Gates
 
-Log in to the web UI at `http://<server-ip>`:
+Log in to the web UI at `http://<server-ip>/`:
 
-1. **Admin login** — default from `seed.py`: `admin` / `admin123`
+1. **Admin login** — username `admin`, password printed at the end of the install
+   and stored in `/etc/parking/install-notes.txt` (advanced mode: created in
+   the wizard). `seed.py` is development-only and refuses to run in production.
 2. Go to **Device → Gates**
 3. Add your gates:
 
@@ -120,7 +133,7 @@ Log in to the web UI at `http://<server-ip>`:
 #### Quick Auto-Enable (Recommended)
 ```bash
 cd /opt/parking-system-v2
-./scripts/enable-gate-daemons.sh --run
+sudo ./scripts/enable-gate-daemons.sh --run
 ```
 
 This script reads all gates from the database and runs the correct `systemctl enable --now` commands for each one. Gates auto-start on future reboots.

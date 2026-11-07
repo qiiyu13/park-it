@@ -37,22 +37,32 @@ QUICK_ADMIN_PASSWORD_FILE=""
 QUICK_GATE_BASE_IP="192.168.1.100"
 QUICK_NO_DAEMONS=false
 QUICK_INCLUDE_LOCAL_SERIAL=false
-for arg in "$@"; do
-    case "$arg" in
+QUICK_OPTS_USED=false
+# Accept both `--flag=value` and `--flag value` (docs use the spaced form).
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --non-interactive) NON_INTERACTIVE=true ;;
         --quick) QUICK=true; NON_INTERACTIVE=true ;;
-        --topology=*) QUICK_TOPOLOGY="${arg#*=}" ;;
-        --tariff=*) QUICK_TARIFF="${arg#*=}" ;;
-        --site-name=*) QUICK_SITE_NAME="${arg#*=}" ;;
-        --admin-user=*) QUICK_ADMIN_USER="${arg#*=}" ;;
-        --admin-password=*) QUICK_ADMIN_PASSWORD="${arg#*=}" ;;
-        --admin-password-file=*) QUICK_ADMIN_PASSWORD_FILE="${arg#*=}" ;;
-        --gate-base-ip=*) QUICK_GATE_BASE_IP="${arg#*=}" ;;
-        --no-daemons) QUICK_NO_DAEMONS=true ;;
-        --include-local-serial) QUICK_INCLUDE_LOCAL_SERIAL=true ;;
+        --topology) QUICK_TOPOLOGY="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --topology=*) QUICK_TOPOLOGY="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --tariff) QUICK_TARIFF="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --tariff=*) QUICK_TARIFF="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --site-name) QUICK_SITE_NAME="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --site-name=*) QUICK_SITE_NAME="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --admin-user) QUICK_ADMIN_USER="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --admin-user=*) QUICK_ADMIN_USER="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --admin-password) QUICK_ADMIN_PASSWORD="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --admin-password=*) QUICK_ADMIN_PASSWORD="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --admin-password-file) QUICK_ADMIN_PASSWORD_FILE="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --admin-password-file=*) QUICK_ADMIN_PASSWORD_FILE="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --gate-base-ip) QUICK_GATE_BASE_IP="${2:-}"; QUICK_OPTS_USED=true; shift ;;
+        --gate-base-ip=*) QUICK_GATE_BASE_IP="${1#*=}"; QUICK_OPTS_USED=true ;;
+        --no-daemons) QUICK_NO_DAEMONS=true; QUICK_OPTS_USED=true ;;
+        --include-local-serial) QUICK_INCLUDE_LOCAL_SERIAL=true; QUICK_OPTS_USED=true ;;
         -h|--help) sed -n '6,30p' "$0"; exit 0 ;;
-        *) error "unknown arg: $arg"; exit 2 ;;
+        *) error "unknown arg: $1"; exit 2 ;;
     esac
+    shift
 done
 
 # Quick topology: preset name or NinMout. Exit lanes are booth-driven; this
@@ -84,6 +94,13 @@ if [[ "$QUICK_TARIFF" != "standard" && "$QUICK_TARIFF" != "mall" ]]; then
 fi
 if [[ -n "$QUICK_ADMIN_PASSWORD" && ${#QUICK_ADMIN_PASSWORD} -lt 8 ]]; then
     error "--admin-password must be at least 8 characters"
+    exit 2
+fi
+# Quick-only options mean nothing without quick provisioning. Silently ignoring
+# them in --advanced mode is how a site ends up with the wrong name/topology.
+if ! $QUICK && $QUICK_OPTS_USED; then
+    error "options like --topology/--tariff/--site-name/--admin-*/--gate-base-ip/--no-daemons only apply to quick mode."
+    error "Remove --advanced, or configure these values in the setup wizard instead."
     exit 2
 fi
 
@@ -384,9 +401,10 @@ ok "Alembic migrations applied"
 step "10/12 — Building Frontend"
 
 cd "$PROJECT_ROOT/frontend"
-if [[ ! -d "node_modules" ]]; then
-    sudo -u parking npm ci
-fi
+# Always reinstall from the lockfile: a stale node_modules silently keeps old
+# dependencies after an upgrade, and a global NODE_ENV=production would omit
+# devDependencies (postinstall runs patch-package).
+sudo -u parking env -u NODE_ENV npm ci
 
 # Build with empty apiBaseUrl so relative /api/ works through nginx
 sudo -u parking bash -c 'NUXT_PUBLIC_API_BASE_URL="" npm run build'
@@ -427,6 +445,17 @@ ok "Nightly backup timer installed and started"
 # Create app data directories
 mkdir -p /var/lib/parking/{snapshots,settlements,logs}
 chown -R parking:parking /var/lib/parking
+
+# Short command used throughout the docs. Without this wrapper every doc that
+# says `parking-doctor` fails with "command not found".
+cat > /usr/local/bin/parking-doctor <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd ${PROJECT_ROOT}
+exec ${PROJECT_ROOT}/.venv/bin/python ${PROJECT_ROOT}/scripts/parking_doctor.py "\$@"
+EOF
+chmod 0755 /usr/local/bin/parking-doctor
+ok "parking-doctor command installed (/usr/local/bin/parking-doctor)"
 
 # Admin dashboard shortcut (single shortcut for the server role). Harmless on a
 # headless box — it's just a .desktop file the admin double-clicks if a GUI exists.
@@ -478,11 +507,17 @@ mkdir -p /etc/parking
 # (unlink checks write on the dir, not the file). Own the dir by parking.
 chown parking:parking /etc/parking
 chmod 0750 /etc/parking
-SETUP_TOKEN=$(openssl rand -hex 32)
-echo -n "$SETUP_TOKEN" > /etc/parking/setup-token
-chown root:parking /etc/parking/setup-token
-chmod 0640 /etc/parking/setup-token
-ok "Token written to /etc/parking/setup-token"
+# Quick mode skips the wizard, so it must not leave a token that implies one.
+if ! $QUICK; then
+    SETUP_TOKEN=$(openssl rand -hex 32)
+    echo -n "$SETUP_TOKEN" > /etc/parking/setup-token
+    chown root:parking /etc/parking/setup-token
+    chmod 0640 /etc/parking/setup-token
+    ok "Token written to /etc/parking/setup-token"
+else
+    rm -f /etc/parking/setup-token
+    ok "Quick mode — no setup wizard token (wizard skipped)"
+fi
 
 # Booth enrollment token — booths redeem this at POST /api/setup/enroll to
 # fetch INTERNAL_API_KEY + Redis address (no hand-copying). Reusable for 24h.
@@ -546,83 +581,6 @@ ln -sf /etc/nginx/sites-available/parking /etc/nginx/sites-enabled/parking
 nginx -t && systemctl restart nginx
 ok "Nginx configured and restarted"
 
-# ── Summary ─────────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Server installation complete!${NC}"
-echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
-echo ""
-info "API:        http://${SERVER_IP}:8000"
-info "Frontend:   http://${SERVER_IP}:3000"
-info "API Docs:   http://${SERVER_IP}:8000/api/docs"
-echo ""
-info "Services:"
-info "  systemctl status parking-api"
-info "  systemctl status parking-events"
-info "  systemctl status parking-frontend"
-info "  systemctl status parking-worker-critical"
-info "  systemctl status parking-worker-bg"
-info "  systemctl status nginx"
-echo ""
-if ! $QUICK; then
-    SETUP_URL="http://${SERVER_IP}/setup?token=${SETUP_TOKEN}"
-    echo ""
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  OPEN THIS LINK ON THE INSTALLER LAPTOP TO FINISH CONFIGURATION${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo "  ${SETUP_URL}"
-    echo ""
-    echo "  Token expires when redeemed or after 24h, whichever comes first."
-    echo "  Regenerate by re-running this script if you lose it."
-fi
-
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  BOOTH ENROLLMENT (use on each booth PC installer)${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo "  Server IP        : ${SERVER_IP}"
-echo "  Enrollment token : ${ENROLL_TOKEN}"
-echo ""
-echo "  Booths redeem this instead of copying INTERNAL_API_KEY by hand."
-echo "  Valid 24h, reusable for every booth. Regenerate: scripts/regen-enroll-token.sh"
-
-# Auto-launch a browser if a desktop session is present (X11 or Wayland).
-# Quick mode skips the wizard entirely.
-if ! $QUICK && [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
-    BROWSER_CMD=""
-    for cand in google-chrome google-chrome-stable chromium chromium-browser firefox xdg-open; do
-        if command -v "$cand" &>/dev/null; then
-            BROWSER_CMD="$cand"
-            break
-        fi
-    done
-    if [[ -n "$BROWSER_CMD" ]]; then
-        sudo -u "${SUDO_USER:-parking}" "$BROWSER_CMD" "$SETUP_URL" >/dev/null 2>&1 &
-        ok "Launched ${BROWSER_CMD} at ${SETUP_URL}"
-    else
-        warn "No browser found — open the link above manually on the installer laptop."
-    fi
-fi
-
-# ── Post-install verification (HARD GATE) ────────────────────────────────────
-step "Post-install — parking-doctor (infrastructure gate)"
-info "Verifying infrastructure: services, DB, Redis, migrations, events consumer, ARQ..."
-# Run from PROJECT_ROOT: settings loads .env relative to cwd, so doctor must
-# see the file we just wrote (installer's cwd may be frontend/ at this point).
-cd "$PROJECT_ROOT"
-# --infra-only = checks that must pass BEFORE the setup wizard (gates/cameras
-# are configured there). Non-zero exit = install is NOT done: the old code
-# printed DONE with a warn, hiding exactly the silent-dead failures this
-# gate exists for. Wizard-dependent checks live in a plain re-run of
-# parking-doctor with no flags.
-if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --infra-only; then
-    ok "INSTALL VERIFIED — all infrastructure checks green."
-else
-    error "INSTALL FAILED VERIFICATION — see the FAIL rows above."
-    error "Fix them, then re-run: cd $PROJECT_ROOT && sudo -u parking .venv/bin/python scripts/parking_doctor.py --infra-only"
-    exit 1
-fi
-
 # ── Quick provisioning (v1-style one-command setup) ──────────────────────────
 if $QUICK; then
     step "Quick provisioning — admin, site, tariff, area, gates"
@@ -667,16 +625,77 @@ if $QUICK; then
         fi
     fi
 
-    echo ""
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  READY TO USE${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo "  Admin URL : http://${SERVER_IP}/"
+fi
+
+# ── Post-install verification (HARD GATE) ────────────────────────────────────
+# Runs LAST: the banner below never prints unless provisioning succeeded and the
+# infrastructure checks pass.
+step "Post-install — parking-doctor (infrastructure gate)"
+info "Verifying infrastructure: services, DB, Redis, migrations, events consumer, ARQ..."
+cd "$PROJECT_ROOT"
+if sudo -u parking "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/parking_doctor.py" --infra-only; then
+    ok "INSTALL VERIFIED — all infrastructure checks green."
+else
+    error "INSTALL FAILED VERIFICATION — see the FAIL rows above."
+    error "Fix them, then re-run: sudo parking-doctor --infra-only"
+    exit 1
+fi
+
+# ── Summary (after provisioning — nothing is announced before it ran) ─────────
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Server installation complete!${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════════${NC}"
+echo ""
+info "Open in a browser:  http://${SERVER_IP}/        (operator/admin page)"
+info "API health check:   http://${SERVER_IP}/api/health"
+echo ""
+if $QUICK; then
     echo "  Username  : ${QUICK_ADMIN_USER}"
-    echo "  Password  : stored in /etc/parking/install-notes.txt (mode 0600)"
-    echo "  Gates     : ${QUICK_IN} IN + ${QUICK_OUT} OUT (default controllers .100+)"
+    echo "  Password  : sudo cat /etc/parking/install-notes.txt  (mode 0600)"
+    echo "  Gates     : ${QUICK_IN} IN + ${QUICK_OUT} OUT (default controller IPs 192.168.1.100+)"
     echo "  Tariff    : ${QUICK_TARIFF}"
-    echo "  Notes     : sudo cat /etc/parking/install-notes.txt"
+    echo "  ↳ Set each gate's real controller IP/port in Device → Gates."
+    echo "    Gate daemons already run; they connect once the IPs are correct."
+else
+    SETUP_URL="http://${SERVER_IP}/setup?token=${SETUP_TOKEN}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}  OPEN THIS LINK ON THE INSTALLER LAPTOP TO FINISH CONFIGURATION${NC}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo "  ${SETUP_URL}"
     echo ""
+    echo "  Token expires when redeemed or after 24h, whichever comes first."
+    echo "  Regenerate by re-running this script if you lose it."
+fi
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  BOOTH ENROLLMENT (use on each booth PC installer)${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo "  Server IP        : ${SERVER_IP}"
+echo "  Enrollment token : ${ENROLL_TOKEN}"
+echo ""
+echo "  Booths redeem this instead of copying INTERNAL_API_KEY by hand."
+echo "  Valid 24h, reusable for every booth. Regenerate: scripts/regen-enroll-token.sh"
+echo ""
+info "For technicians — service status:"
+info "  systemctl status parking-api parking-worker-critical parking-worker-bg"
+info "  systemctl status parking-frontend parking-events nginx"
+info "Full health report: sudo parking-doctor"
+
+# Auto-launch the wizard in a browser if a desktop session is present.
+if ! $QUICK && [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+    BROWSER_CMD=""
+    for cand in google-chrome google-chrome-stable chromium chromium-browser firefox xdg-open; do
+        if command -v "$cand" &>/dev/null; then
+            BROWSER_CMD="$cand"
+            break
+        fi
+    done
+    if [[ -n "$BROWSER_CMD" ]]; then
+        sudo -u "${SUDO_USER:-parking}" "$BROWSER_CMD" "$SETUP_URL" >/dev/null 2>&1 &
+        ok "Launched ${BROWSER_CMD} at ${SETUP_URL}"
+    else
+        warn "No browser found — open the link above manually on the installer laptop."
+    fi
 fi
 echo ""

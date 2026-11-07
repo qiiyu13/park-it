@@ -28,15 +28,38 @@ NON_INTERACTIVE=false
 QUICK=false
 GATE_CODE_FLAG=""
 EMONEY_INIT_KEY_HEX="${EMONEY_INIT_KEY:-}"
-for arg in "$@"; do
-    case "$arg" in
+SERVER_EXTRA=()
+# Accept both `--flag=value` and `--flag value` (docs use the spaced form).
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --non-interactive) NON_INTERACTIVE=true ;;
         --quick) QUICK=true; NON_INTERACTIVE=true ;;
-        --gate-code=*) GATE_CODE_FLAG="${arg#*=}" ;;
-        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${arg#*=}" ;;
+        --gate-code) GATE_CODE_FLAG="${2:-}"; shift ;;
+        --gate-code=*) GATE_CODE_FLAG="${1#*=}" ;;
+        --emoney-init-key) EMONEY_INIT_KEY_HEX="${2:-}"; shift ;;
+        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${1#*=}" ;;
+        # Server quick-mode options are passed through to the server installer
+        # instead of being rejected here.
+        --topology) SERVER_EXTRA+=("--topology=${2:-}"); shift ;;
+        --topology=*) SERVER_EXTRA+=("$1") ;;
+        --tariff) SERVER_EXTRA+=("--tariff=${2:-}"); shift ;;
+        --tariff=*) SERVER_EXTRA+=("$1") ;;
+        --site-name) SERVER_EXTRA+=("--site-name=${2:-}"); shift ;;
+        --site-name=*) SERVER_EXTRA+=("$1") ;;
+        --admin-user) SERVER_EXTRA+=("--admin-user=${2:-}"); shift ;;
+        --admin-user=*) SERVER_EXTRA+=("$1") ;;
+        --admin-password) SERVER_EXTRA+=("--admin-password=${2:-}"); shift ;;
+        --admin-password=*) SERVER_EXTRA+=("$1") ;;
+        --admin-password-file) SERVER_EXTRA+=("--admin-password-file=${2:-}"); shift ;;
+        --admin-password-file=*) SERVER_EXTRA+=("$1") ;;
+        --gate-base-ip) SERVER_EXTRA+=("--gate-base-ip=${2:-}"); shift ;;
+        --gate-base-ip=*) SERVER_EXTRA+=("$1") ;;
+        --no-daemons) SERVER_EXTRA+=("$1") ;;
+        --include-local-serial) SERVER_EXTRA+=("$1") ;;
         -h|--help) sed -n '6,20p' "$0"; exit 0 ;;
-        *) error "unknown arg: $arg"; exit 2 ;;
+        *) error "unknown arg: $1"; exit 2 ;;
     esac
+    shift
 done
 
 # Quick combo: default local lane is the first exit gate provisioned by the
@@ -72,10 +95,12 @@ if [[ ! -f "$SERVER_SETUP" ]]; then
     exit 1
 fi
 
-# Pass through (e.g. --non-interactive/--quick) so both halves behave identically.
+# Pass through (e.g. --non-interactive/--quick) so both halves behave identically,
+# plus any server quick-mode options (--topology/--tariff/--site-name/...).
 SERVER_ARGS=()
 $NON_INTERACTIVE && SERVER_ARGS+=(--non-interactive)
 $QUICK && SERVER_ARGS+=(--quick)
+SERVER_ARGS+=("${SERVER_EXTRA[@]}")
 bash "$SERVER_SETUP" "${SERVER_ARGS[@]}"
 ok "Server installation complete"
 
@@ -366,6 +391,14 @@ systemctl enable "$(basename "$SERVICE_FILE")"
 systemctl start "$(basename "$SERVICE_FILE")"
 ok "Booth bridge service installed and started"
 
+# Entry-gate daemons were enabled by the server quick install for TCP gates.
+# A serial barrier gate lives on THIS machine, so include local serial now.
+if [[ "$GATE_TYPE" == "serial" ]]; then
+    info "Enabling the local serial gate daemon (${GATE_CODE})..."
+    bash /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run --include-local-serial \
+        || warn "Serial gate daemon not enabled — run: sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run --include-local-serial"
+fi
+
 # Combo gets TWO shortcuts: an admin dashboard (normal window, admin logs in)
 # and a booth POS (kiosk, auto-entry). Both target this PC's local server.
 DESKTOP_DIR="/home/parking/Desktop"
@@ -439,24 +472,35 @@ echo ""
 info "Install notes: cat /etc/parking/install-notes.txt"
 echo ""
 warn "Next steps:"
-echo "  1. Log in as admin at http://${SERVER_IP}"
-echo "  2. Add gate records: GIN-01, GIN-02, GOUT-01, GOUT-02 (match the wizard's codes)"
-if [[ "$GATE_TYPE" == "serial" ]]; then
-    echo "     ↳ For the RS232/USB gate (${GATE_CODE}): set protocol=serial, controller_device=${GATE_DEV}"
+echo "  1. Log in as admin at http://${SERVER_IP}/  (password: cat /etc/parking/install-notes.txt)"
+if $QUICK; then
+    echo "  2. Gate rows already exist — Device → Gates: set each controller IP/port"
+    echo "  3. POS ${BOOTH_CODE} already registered and linked to ${GATE_CODE}"
 else
-    echo "     ↳ Use protocol=tcp (compass) with controller IP for each gate"
+    echo "  2. Device → Gates: add gate rows (codes such as GIN-01 / GOUT-01)"
+    echo "  3. Device → POS: add ${BOOTH_CODE} (IP ${SERVER_IP}) and link it to ${GATE_CODE}"
 fi
-echo "  3. Add POS record: ${BOOTH_NAME} / ${BOOTH_CODE} / IP=${SERVER_IP} / Gate=${GATE_CODE}"
-echo "  4. Link ${GATE_CODE} to POS ${BOOTH_CODE}"
-echo "  5. Set up Booth PC 2 (run installer/booth_pc/setup.sh on the 2nd PC)"
-echo "  6. Start gate daemons (reads config from DB, auto-starts on boot):"
 if [[ "$GATE_TYPE" == "serial" ]]; then
-    echo "       sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run --include-local-serial"
-    echo "     ↳ --include-local-serial enables RS232/USB gate daemon on this machine too"
+    echo "     ↳ RS232/USB gate ${GATE_CODE}: protocol=serial, controller_device=${GATE_DEV}"
 else
-    echo "       sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run"
+    echo "     ↳ TCP controllers: protocol=compass, controller IP/port per gate"
 fi
-echo "  7. Open Parking POS shortcut on this PC to test Booth 1"
+echo "  4. Open the Parking POS shortcut on this PC to test Booth 1"
+echo "  5. Booth PC 2: sudo ./install.sh --booth --server-ip ${SERVER_IP} \\"
+echo "       --token $(cat /etc/parking/enroll-token 2>/dev/null || echo '<enroll-token>')"
+if $QUICK; then
+    echo "  Gate daemons: already enabled by the server install —"
+    echo "       systemctl status 'parking-daemon-gate-*'"
+    echo "     (re-enable anytime: sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run)"
+else
+    echo "  6. Start gate daemons (reads gate config from the database):"
+    if [[ "$GATE_TYPE" == "serial" ]]; then
+        echo "       sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run --include-local-serial"
+        echo "     ↳ --include-local-serial also enables the RS232/USB gate on this machine"
+    else
+        echo "       sudo /opt/parking-system-v2/scripts/enable-gate-daemons.sh --run"
+    fi
+fi
 echo ""
 
 # ── Post-install verification (HARD GATE) ────────────────────────────────────

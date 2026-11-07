@@ -30,16 +30,18 @@
 ## Quick Start
 
 ```bash
-# 1. Copy the booth installer to the booth PC
-scp -r installer/booth_pc/ booth-pc:/tmp/
-ssh booth-pc
+# 1. Copy the whole project folder to the booth PC (USB stick or scp)
 
-# 2. Run the installer (requires root)
-cd /tmp/booth_pc
-sudo ./setup.sh
+# 2. On the booth PC, run the installer from the project root
+cd parking-system-v2
+sudo ./install.sh --booth --server-ip <server-ip> --token <enrollment-token>
 ```
 
-The script will interactively prompt you for:
+Get the enrollment token from the server: it is printed at the end of the
+server install and stored in `/etc/parking/install-notes.txt`
+(regenerate: `sudo scripts/regen-enroll-token.sh`).
+
+Without flags, the booth role script asks interactively for:
 - **Server IP** — the main server PC's IP address
 - **Booth name/code** — e.g. "Booth 2", "BOOTH_02"
 - **Booth PC IP** — for auto-detection by the POS page

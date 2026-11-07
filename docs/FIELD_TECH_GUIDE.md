@@ -51,8 +51,9 @@
 Software can be installed in the workshop and the hardware wired on-site later:
 
 - **Workshop:** image the PC, run the installer. Needs no hardware connected.
-  - Server/combo: `sudo installer/setup.sh --role server` (or `combo`).
-  - Booth: `sudo installer/_roles/booth_pc/setup.sh --install-only`.
+  - Server: `sudo ./install.sh --advanced` (guided wizard) or `sudo ./install.sh` (defaults).
+  - Combo: `sudo ./install.sh --combo`.
+  - Booth: `sudo ./install.sh --booth --server-ip <ip> --token <token>`.
 - **On-site:** after the box has its real network address:
   - Server: `sudo scripts/field-reconfig.sh` — fixes `CORS_ORIGINS` for the
     site IP, restarts the API, and mints a fresh wizard token (the workshop
@@ -74,24 +75,22 @@ If you only need a new wizard token (token expired, lost the URL):
 ```bash
 # On the server
 git clone <repo-url> /tmp/parking-system-v2
-cd /tmp/parking-system-v2/installer
-sudo ./setup.sh
+cd /tmp/parking-system-v2
+sudo ./install.sh
 ```
 
-The dispatcher asks which role:
+`install.sh` is the only entry point (`installer/setup.sh` is internal). Roles:
 
 - **server** — backend only (most common for multi-PC sites)
-- **booth** — booth PC only
+- **booth** — booth PC only (`--booth --server-ip <ip> --token <token>`)
 - **combo** — server + booth on one machine (single-PC sites)
 
-You'll be prompted for:
-- Server IP (used in CORS + booth shortcuts)
-- PostgreSQL password
-- JWT secret (blank = auto-generate)
-- Repository URL
+`sudo ./install.sh` runs with defaults and asks **nothing**. `--advanced`
+prompts for server IP, PostgreSQL password, JWT secret (blank = generate) and
+repository URL, then opens the wizard.
 
-The script handles PostgreSQL 16, Redis 7, the Python venv, the Nuxt build,
-nginx, systemd units, and applies all DB migrations.
+Both modes handle PostgreSQL 16, Redis 7, the Python venv, the Nuxt build,
+nginx, systemd units, and all DB migrations.
 
 ### Verify the stack came up
 
@@ -104,13 +103,16 @@ If any service is `failed`, jump to §7 Troubleshooting before proceeding.
 
 ---
 
-## 3. Run the Setup Wizard
+## 3. Run the Setup Wizard (`--advanced` only)
 
-Open `http://<server-ip>` in a browser (use the server itself if booth PC isn't
-ready yet). The wizard takes you through:
+Quick installs skip this section — admin, site, areas and gates already exist;
+log in with the password from `/etc/parking/install-notes.txt`.
 
-1. **First admin** — pick username/password. Change `admin / admin123` the
-   moment login works.
+Open the printed `http://<server-ip>/setup?token=…` link in a browser (token is
+also in `/etc/parking/setup-token`). The wizard takes you through:
+
+1. **First admin** — pick username/password. Weak demo credentials (`admin` /
+   `admin123`) are never created by a production install.
 2. **Site config** — name, currency (IDR), tariff plan.
 3. **Areas + vehicle types** — at minimum: "Umum" area, "Mobil" + "Motor" types.
 4. **Hardware detect** — click the detect button. The wizard runs
@@ -148,7 +150,7 @@ also fires a Close + waits for `gate_closed`.
 A green pill + a number around 200–800 ms means the full pipeline works (DB →
 Redis Stream → daemon → controller → physical relay → daemon event → API). A
 red pill means stop and debug **this** gate before touching the others — first
-look at `parking-doctor --gate <CODE>` output (see §6).
+look at `sudo parking-doctor --gate <CODE>` output (see §6).
 
 ---
 
@@ -157,12 +159,11 @@ look at `parking-doctor --gate <CODE>` output (see §6).
 On each booth PC:
 
 ```bash
-cd /opt/parking-system-v2/installer    # if repo is cloned here
-# or re-clone if not
-sudo ./setup.sh --role booth                       # install + configure
+cd parking-system-v2            # installer copy / repo on the booth PC
+sudo ./install.sh --booth --server-ip <server-ip> --token <enrollment-token>
 # Two-phase (workshop then field):
-#   sudo ./_roles/booth_pc/setup.sh --install-only    # workshop
-#   sudo ./_roles/booth_pc/setup.sh --configure-only  # on-site
+#   sudo ./install.sh --booth --install-only
+#   sudo ./install.sh --booth --configure-only --server-ip <ip> --token <token>
 ```
 
 Installs Chrome in kiosk mode pointed at `http://<server-ip>` and the
@@ -209,7 +210,7 @@ the customer.
 The single most useful command when something looks off:
 
 ```bash
-sudo -u parking .venv/bin/python scripts/parking_doctor.py
+sudo parking-doctor
 ```
 
 It checks: core systemd units, on-disk directories, PostgreSQL, Redis, API
@@ -221,13 +222,13 @@ the exact next command.
 Common forms:
 
 ```bash
-parking-doctor                       # full health table on the server
-parking-doctor --gate GIN-01          # focus one gate
-parking-doctor --json                # for piping into the wizard or a monitor
-parking-doctor --booth               # run on a booth PC (no DB/Redis required)
-parking-doctor --fix                 # interactively run each suggested fix
-parking-doctor --fix --yes           # auto-confirm every fix (use with care)
-parking-doctor --fix --allow-dangerous   # permit rm -rf / dd / mkfs in fixes
+sudo parking-doctor                       # full health table on the server
+sudo parking-doctor --gate GIN-01          # focus one gate
+sudo parking-doctor --json                # for piping into the wizard or a monitor
+sudo parking-doctor --booth               # run on a booth PC (no DB/Redis required)
+sudo parking-doctor --fix                 # interactively run each suggested fix
+sudo parking-doctor --fix --yes           # auto-confirm every fix (use with care)
+sudo parking-doctor --fix --allow-dangerous   # permit rm -rf / dd / mkfs in fixes
 ```
 
 Exit code is 0 if every check passes, 1 otherwise.

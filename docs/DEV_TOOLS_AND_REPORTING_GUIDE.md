@@ -203,10 +203,10 @@ Install E-Parking v2 on a fresh Ubuntu server with role selection
 
 ### Requirements
 
-- Ubuntu 22.04 / 24.04 LTS (fresh install preferred)
+- Ubuntu **24.04 LTS** (22.04 is not supported: no python3.12 in its repos)
 - Internet connection
-- Run as root: `sudo installer/setup.sh` (interactive role prompt) or
-  `sudo installer/setup.sh --role server|booth|combo`
+- Run as root from the repository root: `sudo ./install.sh`
+  (`--advanced` for the guided wizard, `--booth`/`--combo` for other roles)
 
 ### Installation Phases
 
@@ -230,13 +230,14 @@ Install E-Parking v2 on a fresh Ubuntu server with role selection
 After completion, the installer prints:
 
 ```
-  API:       http://localhost/api
-  Frontend:  http://localhost
-  API Docs:  http://localhost/api/docs
-
-  Login:     admin / admin123
-             operator / operator123
+  Server installation complete!
+  Open in a browser:  http://<server-ip>/        (operator/admin page)
+  Username  : admin
+  Password  : sudo cat /etc/parking/install-notes.txt  (mode 0600)
 ```
+
+(Advanced mode prints a `/setup?token=…` wizard link instead; the token is
+also at `/etc/parking/setup-token`.)
 
 ### Configuration Files
 

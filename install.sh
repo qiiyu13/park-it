@@ -19,6 +19,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # clone/pull-update path.
 if [[ -z "${PARKING_SOURCE_DIR:-}" && ! -d "$HERE/.git" ]]; then
     export PARKING_SOURCE_DIR="$HERE"
+elif [[ -d "$HERE/.git" && -z "${PARKING_SOURCE_DIR:-}" ]]; then
+    # Say it explicitly: a technician who cloned a branch expects THIS tree to
+    # be installed, but the server role clones origin into /opt instead.
+    echo "[INFO] Git checkout detected. The server install will clone"
+    echo "       $(git -C "$HERE" remote get-url origin 2>/dev/null || echo '<unknown remote>')"
+    echo "       To install this exact folder instead:"
+    echo "       sudo PARKING_SOURCE_DIR=\"$HERE\" ./install.sh"
+    echo ""
 fi
 
 ROLE="server"
@@ -31,6 +39,10 @@ for arg in "$@"; do
         --server)   ROLE="server" ;;
         --combo)    ROLE="combo" ;;
         --advanced) ADVANCED=true ;;
+        -h|--help)
+            sed -n '2,12p' "$0"
+            exit 0
+            ;;
         *)          PASSTHROUGH+=("$arg") ;;
     esac
 done

@@ -2,6 +2,24 @@
 
 Automated parking management system with real-time hardware control, multi-payment support, and operator POS interface.
 
+## Install (production)
+
+**One command, on the server PC. Ubuntu 24.04 LTS required.**
+
+```bash
+cd parking-system-v2
+sudo ./install.sh
+```
+
+It installs PostgreSQL, Redis, the API, the UI, the workers and the gate-daemon units. Quick mode also creates the admin account and enables the entry-gate daemons, then prints the login URL and password location; advanced mode opens a setup wizard instead.
+
+- **Step-by-step for non-technical installers:** [`INSTALL.md`](INSTALL.md) — exact commands, what each prompt means, what success looks like.
+- **Add options** (site name, gate count, tariff preset): `sudo ./install.sh --site-name "Parkir RS X" --topology 2in2out --tariff mall`
+- **Guided browser setup instead of defaults:** `sudo ./install.sh --advanced`
+- **Booth PC(s):** `sudo ./install.sh --booth --server-ip <server-ip> --token <enrollment-token>`
+
+`install.sh` is the only entry point a technician needs. It calls `installer/setup.sh` internally; role scripts under `installer/_roles/` are for debugging only.
+
 ## Architecture
 
 ```
@@ -51,7 +69,9 @@ Automated parking management system with real-time hardware control, multi-payme
 | **Containerization** | Docker Compose (prod: `docker/docker-compose.prod.yml`) |
 | **Process Mgmt** | systemd (5 service units) |
 
-## Quick Start
+## Developer Setup
+
+> For developing on the code. **Not** how customers install the system — use [`INSTALL.md`](INSTALL.md) for that.
 
 ```bash
 # 1. Clone and set up environment
@@ -171,21 +191,26 @@ mypy .
 
 ## Deployment
 
-### Single Server
+### Supported: installer (bare metal)
 
 ```bash
-# Production Docker Compose
-docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
+sudo ./install.sh          # server   → see INSTALL.md for the walkthrough
+sudo ./install.sh --booth  # booth PC → needs --server-ip and --token
+```
 
-# Apply schema migrations — required on a fresh database, the API does not
-# migrate itself.
+The installer handles system packages, database, migrations, services, nginx,
+admin account and gate daemons. Re-running it is safe: it keeps existing
+secrets and data.
+
+### Alternative: Docker Compose (advanced, not the field path)
+
+Only for development, demos and CI-like environments. Requires Docker and a
+manually supplied `.env`; migrations are **not** run automatically.
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
 docker compose --env-file .env -f docker/docker-compose.prod.yml \
   exec -T api alembic upgrade head
-
-# Or with systemd
-sudo systemctl start parking-api parking-frontend parking-events
-sudo systemctl start parking-daemon-gate-in@GIN-01   # entry gates only; exit lanes use booth-bridge
-sudo systemctl start parking-worker-critical parking-worker-bg
 ```
 
 ### Multi-PC (Server + Booths)
@@ -207,6 +232,8 @@ See `docs/` for full runbook, checklist, and training materials.
 
 | Document | Description |
 |----------|-------------|
+| `INSTALL.md` | **Step-by-step install for technicians (start here)** |
+| `installer/README.md` | Installer roles, quick vs advanced mode, unattended install |
 | `docs/EParking_v2_Development_Plan.md` | Architecture, data models, design decisions |
 | `docs/GATE_FLOW_SPEC.md` | Gate entry/exit flow specifications |
 | `docs/FIELD_TECH_GUIDE.md` | Field install walkthrough (server + booth PCs, wizard) |

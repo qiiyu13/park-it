@@ -44,21 +44,29 @@ NI_GATE_CODE=""
 NI_BOOTH_CODE="BOOTH"
 NI_BOOTH_NAME="Booth"
 EMONEY_INIT_KEY_HEX="${EMONEY_INIT_KEY:-}"
-for arg in "$@"; do
-    case "$arg" in
+# Accept both `--flag=value` and `--flag value` (docs use the spaced form).
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --install-only)   DO_CONFIGURE=false ;;
         --configure-only) DO_INSTALL=false ;;
         --non-interactive) NON_INTERACTIVE=true ;;
         --quick)          QUICK=true; NON_INTERACTIVE=true ;;
-        --server-ip=*)    NI_SERVER_IP="${arg#*=}" ;;
-        --token=*)        NI_TOKEN="${arg#*=}" ;;
-        --gate-code=*)    NI_GATE_CODE="${arg#*=}" ;;
-        --booth-code=*)   NI_BOOTH_CODE="${arg#*=}" ;;
-        --booth-name=*)   NI_BOOTH_NAME="${arg#*=}" ;;
-        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${arg#*=}" ;;
+        --server-ip)      NI_SERVER_IP="${2:-}"; shift ;;
+        --server-ip=*)    NI_SERVER_IP="${1#*=}" ;;
+        --token)          NI_TOKEN="${2:-}"; shift ;;
+        --token=*)        NI_TOKEN="${1#*=}" ;;
+        --gate-code)      NI_GATE_CODE="${2:-}"; shift ;;
+        --gate-code=*)    NI_GATE_CODE="${1#*=}" ;;
+        --booth-code)     NI_BOOTH_CODE="${2:-}"; shift ;;
+        --booth-code=*)   NI_BOOTH_CODE="${1#*=}" ;;
+        --booth-name)     NI_BOOTH_NAME="${2:-}"; shift ;;
+        --booth-name=*)   NI_BOOTH_NAME="${1#*=}" ;;
+        --emoney-init-key) EMONEY_INIT_KEY_HEX="${2:-}"; shift ;;
+        --emoney-init-key=*) EMONEY_INIT_KEY_HEX="${1#*=}" ;;
         -h|--help)        sed -n '4,24p' "$0"; exit 0 ;;
-        *) error "unknown arg: $arg"; exit 2 ;;
+        *) error "unknown arg: $1"; exit 2 ;;
     esac
+    shift
 done
 
 # Quick mode: one command, defaults for everything except the server address,
@@ -183,6 +191,15 @@ EOF
     # exit-relay path needs protocols/shared.
     sudo -u parking .venv/bin/pip install --quiet -e "$PROJECT_ROOT/"
     ok "Application dependencies installed (booth bridge + Omnikey poller)"
+
+    # Same short command the docs/runbooks use on server and booth PCs.
+    cat > /usr/local/bin/parking-doctor <<WRAPPER
+#!/usr/bin/env bash
+set -euo pipefail
+cd ${PROJECT_ROOT}
+exec ${PROJECT_ROOT}/.venv/bin/python ${PROJECT_ROOT}/scripts/parking_doctor.py "\$@"
+WRAPPER
+    chmod 0755 /usr/local/bin/parking-doctor
 
     if ! $DO_CONFIGURE; then
         echo ""
