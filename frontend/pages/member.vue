@@ -12,15 +12,25 @@ import CrudTab from '~/components/admin/CrudTab.vue'
 
 definePageMeta({ middleware: 'auth' })
 
+const { formatDate } = useFormatters()
 const vehicleTypes = ref([])
+
+// is_active alone hides expired members, who the entry gate rejects.
+function memberStatus(isActive, row) {
+  if (!isActive) return { variant: 'secondary', label: 'Nonaktif' }
+  if (row.valid_until && new Date(`${row.valid_until}T23:59:59`) < new Date()) {
+    return { variant: 'destructive', label: 'Kedaluwarsa' }
+  }
+  return { variant: 'success', label: 'Aktif' }
+}
 
 const memberColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
   { prop: 'card_number', label: 'No. Kartu', width: 150, sortable: true },
   { prop: 'plate_number', label: 'Plat', width: 120 },
   { prop: 'vehicle_type_name', label: 'Jenis', width: 120 },
-  { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },
-  { prop: 'valid_until', label: 'Berlaku Sampai', width: 140 },
+  { prop: 'is_active', label: 'Status', type: 'enum', width: 120, badge: memberStatus },
+  { prop: 'valid_until', label: 'Berlaku Sampai', width: 140, formatter: formatDate },
 ]
 const memberFields = computed(() => [
   { prop: 'name', label: 'Nama', type: 'text', required: true },

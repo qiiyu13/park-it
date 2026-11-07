@@ -165,25 +165,4 @@ async function exportReport(format) {
 </script>
 
 <script>
-const StatCard = {
-  props: {
-    label: String,
-    value: String,
-    variant: { type: String, default: '' },
-  },
-  template: `
-    <div class="rounded-lg border border-border bg-surface p-4 text-center shadow-brutal-sm">
-      <div class="mb-1 text-xs font-semibold  text-muted-foreground">{{ label }}</div>
-      <div :class="['text-xl font-semibold font-mono', variantClass]">{{ value }}</div>
-    </div>
-  `,
-  computed: {
-    variantClass() {
-      if (this.variant === 'success') return 'text-success'
-      if (this.variant === 'destructive') return 'text-destructive'
-      if (this.variant === 'warning') return 'text-warning'
-      return 'text-foreground'
-    },
-  },
-}
 </script>

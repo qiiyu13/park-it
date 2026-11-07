@@ -280,47 +280,40 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 async function submitOutgoing() {
   if (outgoingPin.value.length < 4 || props.isLoading) return
   errorMsg.value = ''
-  try {
-    await emit('confirm-outgoing', {
-      sessionId: props.sessionId,
-      pin: outgoingPin.value,
-      endType: props.earlyLeave ? 'EARLY' : 'SCHEDULED',
-      endReason: endReason.value || null,
-    })
-    internalStep.value = 'pending'
-  } catch (err) {
-    errorMsg.value = err.message || 'PIN salah'
-    outgoingPin.value = ''
-  }
+  emit('confirm-outgoing', {
+    sessionId: props.sessionId,
+    pin: outgoingPin.value,
+    endType: props.earlyLeave ? 'EARLY' : 'SCHEDULED',
+    endReason: endReason.value || null,
+  })
 }
 async function submitIncoming() {
   if (!incomingWorker.value || incomingPin.value.length < 4 || props.isLoading) return
   errorMsg.value = ''
-  try {
-    await emit('confirm-incoming', {
-      sessionId: props.sessionId,
-      workerId: incomingWorker.value.id,
-      pin: incomingPin.value,
-    })
-  } catch (err) {
-    errorMsg.value = err.message || 'PIN salah'
-    incomingPin.value = ''
-  }
+  emit('confirm-incoming', {
+    sessionId: props.sessionId,
+    workerId: incomingWorker.value.id,
+    pin: incomingPin.value,
+  })
 }
 async function submitForceLeave() {
   if (forcePin.value.length < 4 || !forceLeaveReason.value.trim() || props.isLoading) return
   errorMsg.value = ''
-  try {
-    await emit('force-leave', {
-      sessionId: props.sessionId,
-      pin: forcePin.value,
-      reason: forceLeaveReason.value.trim(),
-    })
-  } catch (err) {
-    errorMsg.value = err.message || 'PIN salah'
-    forcePin.value = ''
-  }
+  emit('force-leave', {
+    sessionId: props.sessionId,
+    pin: forcePin.value,
+    reason: forceLeaveReason.value.trim(),
+  })
 }
 
-defineExpose({ setError: (m) => { errorMsg.value = m } })
+defineExpose({
+  setError: (m) => {
+    errorMsg.value = m
+    outgoingPin.value = ''
+    incomingPin.value = ''
+    forcePin.value = ''
+  },
+  // Emit can't report failure, so the parent advances only after the API succeeds.
+  advanceToPending: () => { internalStep.value = 'pending' },
+})
 </script>

@@ -20,12 +20,13 @@ async def client(db_session: AsyncSession):
 
     from fastapi import Request
 
-    from api.app.middleware.auth import require_admin
+    from api.app.middleware.auth import require_admin, require_operator
 
     async def mock_require_admin(request: Request):
         return {"sub": "1", "username": "admin", "role": "admin"}
 
     app.dependency_overrides[require_admin] = mock_require_admin
+    app.dependency_overrides[require_operator] = mock_require_admin
 
     # Stub cache invalidation (write hooks) so tests don't hit Redis.
     from unittest.mock import patch
@@ -146,3 +147,40 @@ class TestDeleteVehicleType:
     async def test_delete_not_found(self, client: AsyncClient):
         response = await client.delete("/api/vehicle-types/99999")
         assert response.status_code == 404
+
+
+class TestVehicleTypeAccess:
+    """The POS runs as an operator, so reads are open to it but writes are not."""
+
+    async def test_operator_reads_but_cannot_write(self, db_session: AsyncSession):
+        from unittest.mock import AsyncMock, patch
+
+        def override_get_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = override_get_db
+        operator = {"sub": "2", "username": "operator", "role": "operator"}
+        try:
+            with patch("api.app.middleware.auth.require_auth", AsyncMock(return_value=operator)):
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as ac:
+                    assert (await ac.get("/api/vehicle-types")).status_code == 200
+                    denied = await ac.post(
+                        "/api/vehicle-types", json={"name": "Truk", "code": "TRK"}
+                    )
+                    assert denied.status_code == 403
+        finally:
+            app.dependency_overrides.clear()
+
+
+def test_user_response_tolerates_stored_email_the_validator_rejects():
+    from types import SimpleNamespace
+
+    from api.app.schemas.user import UserResponse
+
+    user = SimpleNamespace(
+        id=1, username="agus", email="agus@demo.invalid", full_name="Agus",
+        role="operator", is_active=True, phone=None, worker_pin=None,
+    )
+    assert UserResponse.model_validate(user).email == "agus@demo.invalid"

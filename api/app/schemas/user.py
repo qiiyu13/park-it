@@ -38,6 +38,9 @@ class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # Plain str: one stored address the validator dislikes must not take down
+    # every list that returns users, such as the POS worker picker.
+    email: str | None = None
     worker_pin: bool = False  # True if PIN is set (hash is never exposed)
 
     @field_validator("worker_pin", mode="before")

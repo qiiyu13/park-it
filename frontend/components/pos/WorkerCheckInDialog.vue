@@ -159,18 +159,13 @@ watch(pin, (val) => {
 async function submit() {
   if (!selectedWorker.value || pin.value.length < 4 || props.isLoading) return
   errorMsg.value = ''
-  try {
-    await emit('check-in', {
-      gateId: props.gateId,
-      workerId: selectedWorker.value.id,
-      pin: pin.value,
-      isSubstitute: isSubstitute.value,
-      originalWorkerId: isSubstitute.value ? originalWorkerId.value : null,
-    })
-  } catch (err) {
-    errorMsg.value = err.message || 'PIN salah'
-    pin.value = ''
-  }
+  emit('check-in', {
+    gateId: props.gateId,
+    workerId: selectedWorker.value.id,
+    pin: pin.value,
+    isSubstitute: isSubstitute.value,
+    originalWorkerId: isSubstitute.value ? originalWorkerId.value : null,
+  })
 }
 
 defineExpose({ setError: (m) => { errorMsg.value = m; pin.value = '' } })

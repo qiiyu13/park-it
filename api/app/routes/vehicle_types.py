@@ -1,9 +1,9 @@
-"""Vehicle type management routes (admin only)."""
+"""Vehicle type routes: operators read (the POS needs them), admins write."""
 
 from api.app.cache.reference_data import (
     invalidate_vehicle_types,
 )
-from api.app.middleware.auth import require_admin
+from api.app.middleware.auth import require_admin, require_operator
 from api.app.models.vehicle_type import VehicleType
 from api.app.routes.crud_factory import create_crud_router
 from api.app.schemas.vehicle_type import (
@@ -46,6 +46,7 @@ router = create_crud_router(
     tags=["Vehicle Types"],
     search_fields=["name", "code"],
     auth_dependency=require_admin,
+    read_auth_dependency=require_operator,
     on_create=_on_create,
     on_update=_on_update,
     on_delete=_on_delete,

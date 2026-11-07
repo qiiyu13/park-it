@@ -84,8 +84,8 @@
               </Badge>
 
               <!-- Enum type -->
-              <Badge v-else-if="col.type === 'enum'" :variant="enumBadge(row[col.prop]).variant">
-                {{ enumBadge(row[col.prop]).label }}
+              <Badge v-else-if="col.type === 'enum'" :variant="badgeFor(col, row).variant">
+                {{ badgeFor(col, row).label }}
               </Badge>
 
               <!-- Custom formatter -->
@@ -98,14 +98,14 @@
             </td>
 
             <!-- Actions -->
-            <td v-if="hasActions" class="px-4 py-3">
+            <td v-if="hasActions" class="px-4 py-1.5">
               <div class="flex items-center gap-1">
                 <slot name="row-actions" :row="row" />
                 <Button
                   v-if="showEdit"
                   variant="ghost"
                   size="icon-sm"
-                  class="text-muted-foreground"
+                  class="size-8 text-muted-foreground"
                   title="Edit"
                   aria-label="Edit"
                   @click="$emit('edit', row)"
@@ -119,7 +119,7 @@
                   v-if="showDelete"
                   variant="ghost"
                   size="icon-sm"
-                  class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title="Hapus"
                   aria-label="Hapus"
                   @click="$emit('delete', row)"
@@ -194,7 +194,10 @@ const ENUM_BADGES = {
   PARTIAL: { variant: 'warning', label: 'Sebagian' },
 }
 
-function enumBadge(value) {
+// A column can supply `badge(value, row)` when the status depends on more than one field.
+function badgeFor(col, row) {
+  const value = row[col.prop]
+  if (col.badge) return col.badge(value, row)
   return ENUM_BADGES[value] ?? { variant: 'secondary', label: value ?? '-' }
 }
 

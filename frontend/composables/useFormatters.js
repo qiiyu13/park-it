@@ -9,6 +9,16 @@ export function useFormatters() {
     return `Rp ${new Intl.NumberFormat('id-ID').format(amount)}`
   }
 
+  // Date-only API values ('2027-10-03'). Anchored to local midnight so the day never shifts.
+  function formatDate(value) {
+    if (!value) return '-'
+    return new Date(`${value}T00:00:00`).toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+  }
+
   function formatDuration(totalSeconds) {
     if (!totalSeconds || totalSeconds < 0) return '0m'
     const hours = Math.floor(totalSeconds / 3600)
@@ -51,6 +61,7 @@ export function useFormatters() {
 
   return {
     formatCurrency,
+    formatDate,
     formatDuration,
     formatTime,
     formatDateTime,

@@ -115,6 +115,7 @@
     <!-- Worker Check-In (blocking — no session active) -->
     <PosWorkerCheckInDialog
       v-if="showCheckInDialog"
+      ref="checkInDialog"
       :gate-id="selectedGate?.id"
       :workers="workerSessionStore.workers"
       :is-loading="workerSessionStore.isLoading"
@@ -124,6 +125,7 @@
     <!-- Worker Handover -->
     <PosWorkerHandoverDialog
       v-if="showHandoverDialog"
+      ref="handoverDialog"
       :session-id="workerSessionStore.activeSession?.id"
       :current-worker="workerSessionStore.currentWorker"
       :workers="workerSessionStore.workers"
@@ -185,12 +187,13 @@ function reloadPage() {
 
 // Worker session state
 const showHandoverDialog = ref(false)
+const checkInDialog = ref(null)
+const handoverDialog = ref(null)
 let shiftEndTimer = null
 
+// Stays mounted while check-in is in flight so a failure can show in the dialog.
 const showCheckInDialog = computed(() =>
-  !!selectedGate.value &&
-  !workerSessionStore.activeSession &&
-  !workerSessionStore.isLoading
+  !!selectedGate.value && !workerSessionStore.activeSession
 )
 
 // The check-in dialog blocks the whole POS. If it's shown with an empty
@@ -365,6 +368,7 @@ const emoneyCardInfo = computed(() => {
 // Sync displayTariff when transaction loads/clears
 watch(() => gateStore.currentTransaction, (tx) => {
   displayTariff.value = tx?.tariff || tx?.fee || 0
+  if (isMixedLane.value) activeVehicleTypeId.value = tx?.vehicle_type_id ?? null
   if (tx?.entry_snapshot_id && tx?.plate_number) {
     lastEntry.value = {
       plateNumber: tx.plate_number,
@@ -384,6 +388,12 @@ watch(selectedGate, (gate) => {
   }
 }, { immediate: true })
 
+function selectVehicleType(namePattern) {
+  if (!isMixedLane.value) return
+  const vt = websiteStore.vehicleTypes.find((t) => namePattern.test(t.name))
+  if (vt) onVehicleTypeChange(vt.id)
+}
+
 // Keyboard shortcuts
 useKeyboard([
   { keys: ['F1'], action: () => {
@@ -400,24 +410,9 @@ useKeyboard([
   } }, // hidden fallback
   { keys: [' '], action: () => gateStore.awaitingGateOpen && openGateAction() },
   { keys: ['Escape'], action: () => { showCashDialog.value = false; showRfidDialog.value = false } },
-  {
-    keys: ['c', 'C'],
-    action: () => {
-      if (!isMixedLane.value) return
-      const vt = websiteStore.vehicleTypes.find((t) => /MOB|CAR/i.test(t.code))
-        || websiteStore.vehicleTypes[0]
-      if (vt) onVehicleTypeChange(vt.id)
-    },
-  },
-  {
-    keys: ['m', 'M'],
-    action: () => {
-      if (!isMixedLane.value) return
-      const vt = websiteStore.vehicleTypes.find((t) => /MOT/i.test(t.code))
-        || websiteStore.vehicleTypes[1]
-      if (vt) onVehicleTypeChange(vt.id)
-    },
-  },
+  // `keys` is a chord (all must match), so each case needs its own entry.
+  ...['c', 'C'].map((key) => ({ keys: [key], action: () => selectVehicleType(/mobil|car/i) })),
+  ...['m', 'M'].map((key) => ({ keys: [key], action: () => selectVehicleType(/motor/i) })),
 ], {
   // Suppress F-key/letter shortcuts while a modal owns input focus so they
   // don't hijack PIN/amount typing. Escape still passes through.
@@ -570,10 +565,11 @@ async function openGateAction() {
     return
   }
 
+  // No booth, no relay: the exit lane has no daemon, so this only records the
+  // open. Never tell the operator the barrier moved.
   const result = await gateStore.openGate({ gateId: selectedGate.value.id })
   if (result?.success) {
-    sound.gateOpen()
-    toast.success('Palang pintu dibuka')
+    toast.warning('Booth offline. Palang tidak terbuka otomatis, buka secara manual.')
   } else {
     toast.error(result?.message || 'Gagal membuka palang')
   }
@@ -751,27 +747,47 @@ function onWorkerBadgeClick() {
   showHandoverDialog.value = true
 }
 
+function workerErrorText(err) {
+  return err.status === 401 ? 'PIN salah' : (err.message || 'Gagal memproses')
+}
+
 async function onCheckIn(payload) {
-  await workerSessionStore.checkIn(payload)
-  toast.success(`Selamat bertugas, ${workerSessionStore.currentWorker?.full_name || ''}!`)
+  try {
+    await workerSessionStore.checkIn(payload)
+    toast.success(`Selamat bertugas, ${workerSessionStore.currentWorker?.full_name || ''}!`)
+  } catch (err) {
+    checkInDialog.value?.setError(workerErrorText(err))
+  }
 }
 
 async function onConfirmOutgoing(payload) {
-  await workerSessionStore.confirmOutgoing(payload)
-  // dialog stays open in pending step
+  try {
+    await workerSessionStore.confirmOutgoing(payload)
+    handoverDialog.value?.advanceToPending()
+  } catch (err) {
+    handoverDialog.value?.setError(workerErrorText(err))
+  }
 }
 
 async function onConfirmIncoming(payload) {
-  await workerSessionStore.confirmIncoming(payload)
-  showHandoverDialog.value = false
-  scheduleShiftEndTimer()
-  toast.success(`Serah terima berhasil. Selamat bertugas!`)
+  try {
+    await workerSessionStore.confirmIncoming(payload)
+    showHandoverDialog.value = false
+    scheduleShiftEndTimer()
+    toast.success(`Serah terima berhasil. Selamat bertugas!`)
+  } catch (err) {
+    handoverDialog.value?.setError(workerErrorText(err))
+  }
 }
 
 async function onForceLeave(payload) {
-  await workerSessionStore.forceLeave(payload)
-  showHandoverDialog.value = false
-  toast.warning('Anda meninggalkan pos. Admin telah diberitahu.')
+  try {
+    await workerSessionStore.forceLeave(payload)
+    showHandoverDialog.value = false
+    toast.warning('Anda meninggalkan pos. Admin telah diberitahu.')
+  } catch (err) {
+    handoverDialog.value?.setError(workerErrorText(err))
+  }
 }
 
 function scheduleShiftEndTimer() {

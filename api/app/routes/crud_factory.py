@@ -25,6 +25,7 @@ def create_crud_router(
     tags: list[str],
     search_fields: list[str] | None = None,
     auth_dependency: Callable = require_admin,
+    read_auth_dependency: Callable | None = None,
     on_create: Callable[[Any], Awaitable[None]] | None = None,
     on_update: Callable[[Any], Awaitable[None]] | None = None,
     on_delete: Callable[[int], Awaitable[None]] | None = None,
@@ -42,12 +43,14 @@ def create_crud_router(
         tags: OpenAPI tags
         search_fields: Fields to search when pagination.q is provided
         auth_dependency: Auth dependency (default: require_admin)
+        read_auth_dependency: Auth for list/get when reads are wider than writes
         on_create: Async hook called after create with the new instance
         on_update: Async hook called after update with the updated instance
         on_delete: Async hook called after delete with the deleted ID
         use_pagination: Whether to use PaginationParams for list endpoint
         not_found_detail: Error message when resource not found
     """
+    read_dependency = read_auth_dependency or auth_dependency
     router = APIRouter(prefix=prefix, tags=tags)
 
     id_path = "/{id}"
@@ -69,7 +72,7 @@ def create_crud_router(
         async def list_items(
             pagination: PaginationParams = Depends(),
             db: AsyncSession = Depends(get_db),
-            current_user: dict = Depends(auth_dependency),
+            current_user: dict = Depends(read_dependency),
         ) -> list:
             stmt = select(model)
             stmt = _apply_search(stmt, pagination.q)
@@ -79,7 +82,7 @@ def create_crud_router(
         @router.get("", response_model=list[schema_response])
         async def list_items(
             db: AsyncSession = Depends(get_db),
-            current_user: dict = Depends(auth_dependency),
+            current_user: dict = Depends(read_dependency),
         ) -> list:
             result = await db.execute(select(model))
             items = result.scalars().all()
@@ -103,7 +106,7 @@ def create_crud_router(
     async def get_item(
         id: int,
         db: AsyncSession = Depends(get_db),
-        current_user: dict = Depends(auth_dependency),
+        current_user: dict = Depends(read_dependency),
     ):
         item = await db.get(model, id)
         if item is None:

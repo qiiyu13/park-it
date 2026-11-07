@@ -115,14 +115,14 @@ onMounted(() => { loadGateNames(); loadUnresolved(); loadActive(); loadAlerts();
 
 async function loadUnresolved() {
   loadingUnresolved.value = true
-  try { unresolvedEmoney.value = (await fetchApi('/api/transactions?status=LOST_CONTACT&limit=50')) || [] }
+  try { unresolvedEmoney.value = (await fetchApi('/api/transactions?status=LOST_CONTACT&limit=50')).items ?? [] }
   catch (e) { console.error(e) }
   finally { loadingUnresolved.value = false }
 }
 
 async function loadActive() {
   loadingActive.value = true
-  try { activeTransactions.value = (await fetchApi('/api/transactions?status=ACTIVE&limit=50')) || [] }
+  try { activeTransactions.value = (await fetchApi('/api/transactions?status=ACTIVE&limit=50')).items ?? [] }
   catch (e) { console.error(e) }
   finally { loadingActive.value = false }
 }
