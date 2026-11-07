@@ -3,12 +3,29 @@
 from collections.abc import AsyncGenerator
 
 import pytest_asyncio
+import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from api.app.models.base import Base
 from shared.config import get_settings
 
 settings = get_settings()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_rate_limits() -> AsyncGenerator[None, None]:
+    """Drop rate-limit counters between tests.
+
+    They live in Redis keyed by client IP and accumulate over the whole session,
+    which intermittently 429'd late tests depending on run order.
+    """
+    client = aioredis.from_url(settings.redis_url)
+    try:
+        async for key in client.scan_iter("rate_limit:*"):
+            await client.delete(key)
+    finally:
+        await client.aclose()
+    yield
 
 # Use a test database
 TEST_DATABASE_URL = (

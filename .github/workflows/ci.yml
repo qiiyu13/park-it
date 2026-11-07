@@ -20,9 +20,6 @@ jobs:
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
       JWT_SECRET: test-secret-key-for-ci-only-32bytes-long
-      # Test-only: the API rate limiter counts against shared Redis, so a full
-      # suite run intermittently 429s late tests (seen on test_delete_success).
-      RATE_LIMIT_DISABLED: "true"
     services:
       postgres:
         image: postgres:16
