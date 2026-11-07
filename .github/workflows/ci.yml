@@ -71,8 +71,10 @@ jobs:
           python -c "from api.app.main import app; print('OK')"
 
       - name: Check route count
+        # OpenAPI paths, not app.routes: FastAPI >= 0.162 keeps included
+        # routers as lazy _IncludedRouter entries there.
         run: |
-          python -c "from api.app.main import app; routes=[r for r in app.routes if hasattr(r,'path')]; print('Routes:', len(routes))"
+          python -c "from api.app.main import app; print('Paths:', len(app.openapi()['paths']))"
 
   migrations:
     runs-on: ubuntu-latest

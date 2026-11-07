@@ -146,5 +146,9 @@ class TestRouteCountSmoke:
     """Verify expected number of routes are loaded."""
 
     def test_minimum_route_count(self):
-        routes = [r for r in app.routes if hasattr(r, "path")]
-        assert len(routes) >= 71, f"Expected >= 71 routes, found {len(routes)}"
+        # FastAPI >= 0.162 keeps include_router() results as lazy
+        # _IncludedRouter entries in app.routes, so counting routes there
+        # reports "2" even though every router is mounted. Count the generated
+        # OpenAPI paths instead.
+        paths = app.openapi().get("paths", {})
+        assert len(paths) >= 80, f"Expected >= 80 paths, found {len(paths)}"
