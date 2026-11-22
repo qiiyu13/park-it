@@ -7,7 +7,13 @@
 
 export default defineNuxtPlugin((nuxtApp) => {
   const config = useRuntimeConfig()
-  const wsBaseUrl = config.public.wsBaseUrl
+  // Empty runtime config = same-origin: derive wss://<current host> so the
+  // operator opens http(s)://<server-ip>/ and nothing points at localhost.
+  const sameOrigin =
+    import.meta.client
+      ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
+      : ''
+  const wsBaseUrl = config.public.wsBaseUrl || sameOrigin
 
   class ParkingWebSocket {
     constructor() {

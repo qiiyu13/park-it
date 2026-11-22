@@ -33,7 +33,7 @@ export function useKeyboard(handlers, options = {}) {
           continue
         }
         // Skip single-key shortcuts when typing in inputs
-        if (isInput && handler.keys.length === 1 && !['Escape', 'F1', 'F2', 'F3', 'F4'].includes(handler.keys[0])) {
+        if (isInput && handler.keys.length === 1 && !['Escape', 'F1', 'F2', 'F3', 'F4', 'F11', 'F12'].includes(handler.keys[0])) {
           continue
         }
         e.preventDefault()

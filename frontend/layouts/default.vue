@@ -110,6 +110,7 @@ import {
   Wrench,
   CalendarDays,
   UserCog,
+  Images,
 } from 'lucide-vue-next'
 
 const authStore = useAuthStore()
@@ -131,6 +132,7 @@ const operatorItems = [
 
 const adminItems = [
   { path: '/', label: 'Dashboard', icon: markRaw(LayoutGrid) },
+  { path: '/pos', label: 'POS Kiosk', icon: markRaw(Monitor) },
   { path: '/gate-in', label: 'Gate In', icon: markRaw(LogIn) },
   { path: '/gates-status', label: 'Gate Status', icon: markRaw(Activity) },
   { path: '/transaksi', label: 'Transaksi', icon: markRaw(FileText) },
@@ -139,6 +141,7 @@ const adminItems = [
   { path: '/personnel', label: 'Personil', icon: markRaw(UserCog) },
   { path: '/report', label: 'Laporan', icon: markRaw(BarChart3) },
   { path: '/notification', label: 'Notifikasi', icon: markRaw(Bell) },
+  { path: '/snapshots', label: 'Arsip Snapshot', icon: markRaw(Images) },
   { path: '/setting', label: 'Pengaturan', icon: markRaw(Settings) },
   { path: '/device', label: 'Perangkat', icon: markRaw(Cpu) },
   { path: '/setup', label: 'Setup', icon: markRaw(Wrench) },
@@ -163,6 +166,7 @@ const pageTitle = computed(() => {
     '/member': 'Member',
     '/report': 'Laporan',
     '/notification': 'Notifikasi',
+    '/snapshots': 'Arsip Snapshot',
     '/login': 'Login',
   }
   return titles[route.path] || 'E-Parking'

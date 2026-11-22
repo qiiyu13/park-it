@@ -40,7 +40,6 @@ TARIFF_PRESETS: dict[str, list[dict[str, Any]]] = {
     "standard": [
         {"name": "Motor", "code": "MOTOR", "hourly_rate": 2000, "max_daily_cap": 15000},
         {"name": "Mobil", "code": "MOBIL", "hourly_rate": 5000, "max_daily_cap": 50000},
-        {"name": "Bus / Truk", "code": "BUS", "hourly_rate": 10000, "max_daily_cap": 100000},
     ],
     "mall": [
         {
@@ -49,7 +48,7 @@ TARIFF_PRESETS: dict[str, list[dict[str, Any]]] = {
             "base_tariff": 2000,
             "hourly_rate": 1000,
             "max_daily_cap": 15000,
-            "is_progressive": True,
+            "tariff_mode": "progressive",
         },
         {
             "name": "Mobil",
@@ -57,15 +56,7 @@ TARIFF_PRESETS: dict[str, list[dict[str, Any]]] = {
             "base_tariff": 5000,
             "hourly_rate": 2000,
             "max_daily_cap": 30000,
-            "is_progressive": True,
-        },
-        {
-            "name": "Truk",
-            "code": "TRUK",
-            "base_tariff": 10000,
-            "hourly_rate": 3000,
-            "max_daily_cap": 60000,
-            "is_progressive": True,
+            "tariff_mode": "progressive",
         },
     ],
 }
@@ -207,7 +198,8 @@ async def provision_quickstart(
                 lost_ticket_penalty=int(item.get("lost_ticket_penalty", 0)),
                 overnight_mode=str(item.get("overnight_mode", "midnight")),
                 overnight_tariff=int(item.get("overnight_tariff", 0)),
-                is_progressive=bool(item.get("is_progressive", False)),
+                tariff_mode=str(item.get("tariff_mode", "hourly")),
+                grace_period_minutes=int(item.get("grace_period_minutes", 15)),
             )
         )
         existing_codes.add(item["code"])

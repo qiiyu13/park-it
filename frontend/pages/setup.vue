@@ -162,7 +162,7 @@
               <th class="px-3 py-2 text-right">Tarif jam-1</th>
               <th class="px-3 py-2 text-right">Per jam</th>
               <th class="px-3 py-2 text-right">Cap harian</th>
-              <th class="px-3 py-2 text-center">Progresif</th>
+              <th class="px-3 py-2 text-center">Mode Tarif</th>
               <th class="px-3 py-2" />
             </tr>
           </thead>
@@ -174,7 +174,11 @@
               <td class="px-3 py-2"><Input v-model.number="item.hourly_rate" type="number" min="0" class="h-8 text-right" /></td>
               <td class="px-3 py-2"><Input v-model.number="item.max_daily_cap" type="number" min="0" class="h-8 text-right" /></td>
               <td class="px-3 py-2 text-center">
-                <input v-model="item.is_progressive" type="checkbox" class="h-4 w-4 accent-primary" >
+                <select v-model="item.tariff_mode" class="h-8 rounded border border-border bg-background px-1 text-xs">
+                  <option value="flat">Tetap</option>
+                  <option value="hourly">Per jam</option>
+                  <option value="progressive">Progresif</option>
+                </select>
               </td>
               <td class="px-3 py-2 text-right">
                 <Button variant="ghost" size="sm" @click="removeTariffItem(idx)">Hapus</Button>
@@ -720,7 +724,7 @@ function applyPreset(presetId) {
     overnight_mode: 'midnight',
     overnight_tariff: 0,
     lost_ticket_penalty: 0,
-    is_progressive: item.rate_type === 'progressive',
+    tariff_mode: item.rate_type === 'progressive' ? 'progressive' : 'hourly',
   }))
 }
 
@@ -728,7 +732,7 @@ function addTariffItem() {
   form.tariff.items.push({
     name: '', code: '', base_tariff: 0, hourly_rate: 0, max_daily_cap: 0,
     overnight_mode: 'midnight', overnight_tariff: 0, lost_ticket_penalty: 0,
-    is_progressive: false,
+    tariff_mode: 'hourly',
   })
 }
 
@@ -803,7 +807,7 @@ async function saveCurrentStep() {
             overnight_mode: item.overnight_mode,
             overnight_tariff: item.overnight_tariff,
             lost_ticket_penalty: item.lost_ticket_penalty,
-            is_progressive: item.is_progressive,
+            tariff_mode: item.tariff_mode || 'hourly',
           }),
         }).catch((err) => {
           if (err.status !== 409) throw err

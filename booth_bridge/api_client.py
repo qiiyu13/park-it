@@ -140,6 +140,16 @@ class ApiClient:
             logger.error("rfid_exit_failed", card=card_number, error=str(e))
             return {"success": False, "message": str(e)}
 
+    async def take_pending_open(self, booth_code: str) -> dict[str, Any] | None:
+        """Poll + take an admin-queued open for any OUT gate of this booth."""
+        try:
+            return await self._post(
+                "/api/pos/pending-open", {"booth_code": booth_code}
+            )
+        except Exception as e:
+            logger.warning("pending_open_poll_failed", error=str(e))
+            return {"command": None}
+
     async def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """POST /api/pos/heartbeat. Returns ``None`` on transport failure.
 

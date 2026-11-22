@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col gap-2">
+  <div :class="['flex flex-col gap-2', fill ? 'h-full' : '']">
     <!-- Skeleton slots when no cameras configured -->
     <template v-if="slots.length === 0">
       <div
@@ -19,7 +19,10 @@
       <div
         v-for="(cam, i) in slots"
         :key="i"
-        class="w-full aspect-video relative overflow-hidden rounded-lg bg-black border border-border/40"
+        :class="[
+          'w-full relative overflow-hidden rounded-lg bg-black border border-border/40',
+          fill ? 'h-full' : 'aspect-video',
+        ]"
       >
         <img
           v-if="cam.url && !imgErrors[i]"
@@ -54,6 +57,8 @@ const props = defineProps({
   cameras: { type: Array, default: () => [] },
   placeholderCount: { type: Number, default: 2 },
   refreshIntervalMs: { type: Number, default: 2000 },
+  // Live view fills the available height (CCTV wall) instead of a 16:9 box.
+  fill: { type: Boolean, default: false },
 })
 
 const slots = computed(() => props.cameras)
@@ -62,13 +67,19 @@ const imgSrcs = ref([])
 const imgErrors = ref([])
 let refreshTimer = null
 
+function isStream(url) {
+  // MJPEG live stream: browser keeps the connection open, no cache-buster.
+  return typeof url === 'string' && url.includes('/stream')
+}
+
 function buildSrc(url) {
+  if (isStream(url)) return url
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`
 }
 
 function refreshImages() {
   props.cameras.forEach((cam, i) => {
-    if (cam.url && !imgErrors.value[i]) {
+    if (cam.url && !imgErrors.value[i] && !isStream(cam.url)) {
       imgSrcs.value[i] = buildSrc(cam.url)
     }
   })

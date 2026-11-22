@@ -107,7 +107,7 @@ class TestCalculateTariff:
         config = TariffConfig(
             vehicle_types={
                 "MOBIL": VehicleTypeRate(
-                    hourly_rate=2000, daily_cap=0, base_tariff=5000, is_progressive=True
+                    hourly_rate=2000, daily_cap=0, base_tariff=5000, tariff_mode="progressive"
                 ),
             }
         )
@@ -116,6 +116,33 @@ class TestCalculateTariff:
         assert calculate_tariff(entry, datetime(2026, 4, 25, 11, 0, 0), "MOBIL", config) == 5000
         # 3 hours: 5000 + 2 * 2000
         assert calculate_tariff(entry, datetime(2026, 4, 25, 13, 0, 0), "MOBIL", config) == 9000
+
+    def test_flat_mode_one_fee_per_visit(self):
+        """Flat: same fee whether the stay is 2 or 5 hours."""
+        config = TariffConfig(
+            vehicle_types={
+                "MOBIL": VehicleTypeRate(
+                    hourly_rate=0, daily_cap=0, base_tariff=3000, tariff_mode="flat"
+                ),
+            }
+        )
+        entry = datetime(2026, 4, 25, 10, 0, 0)
+
+        assert calculate_tariff(entry, datetime(2026, 4, 25, 12, 0, 0), "MOBIL", config) == 3000
+        assert calculate_tariff(entry, datetime(2026, 4, 25, 15, 0, 0), "MOBIL", config) == 3000
+
+    def test_per_type_grace_overrides_default(self):
+        """grace_period_minutes=0 charges from the first minute."""
+        config = TariffConfig(
+            vehicle_types={
+                "MOBIL": VehicleTypeRate(
+                    hourly_rate=3000, daily_cap=0, grace_period_minutes=0
+                ),
+            }
+        )
+        entry = datetime(2026, 4, 25, 10, 0, 0)
+
+        assert calculate_tariff(entry, datetime(2026, 4, 25, 10, 2, 0), "MOBIL", config) == 3000
 
     def test_overnight_midnight_surcharge(self):
         """Overnight surcharge added once per calendar-midnight crossed."""

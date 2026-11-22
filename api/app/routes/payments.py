@@ -27,7 +27,11 @@ from api.app.services.payment import (
     process_rfid_payment,
 )
 from api.app.services.rate_limit_booth import enforce_booth_rate_limit
-from api.app.services.transaction import calculate_transaction_fee, find_active_transaction
+from api.app.services.transaction import (
+    calculate_transaction_fee,
+    find_active_transaction,
+    lane_vehicle_type_id,
+)
 from api.database import get_db
 from shared.events import DeductStatus
 from shared.logging import get_logger
@@ -408,7 +412,12 @@ async def lookup_transaction(
     if tx is None:
         return TransactionLookupResponse(found=False)
 
-    fee = await calculate_transaction_fee(db, tx, vehicle_type_id_override=lookup.vehicle_type_id)
+    # A ticket has no vehicle type until exit; price it with the lane's type so
+    # the fare shown equals the fare the cash/e-money step will charge.
+    vt_id = lookup.vehicle_type_id
+    if vt_id is None and tx.vehicle_type_id is None:
+        vt_id = await lane_vehicle_type_id(db, lookup.gate_out_id)
+    fee = await calculate_transaction_fee(db, tx, vehicle_type_id_override=vt_id)
 
     return TransactionLookupResponse(
         found=True,
@@ -418,7 +427,7 @@ async def lookup_transaction(
             "card_number": tx.card_number,
             "plate_number": tx.plate_number,
             "entry_time": tx.entry_time.isoformat() if tx.entry_time else None,
-            "vehicle_type_id": tx.vehicle_type_id,
+            "vehicle_type_id": tx.vehicle_type_id if tx.vehicle_type_id is not None else vt_id,
             "gate_in_id": tx.gate_in_id,
             "payment_method": tx.payment_method,
         },

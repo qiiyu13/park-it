@@ -245,6 +245,11 @@ async def check_events_consumer(report: Report) -> None:
     try:
         await redis_client.connect()
         ttl = await redis_client.client.ttl("heartbeat:event-consumer")
+        if ttl <= 0:
+            # Right after a restart the first beat lands a couple of seconds
+            # late; one short retry avoids a false FAIL in the install gate.
+            await asyncio.sleep(4)
+            ttl = await redis_client.client.ttl("heartbeat:event-consumer")
         if ttl > 0:
             c.message = f"beating (ttl={ttl}s)"
         else:
@@ -562,8 +567,20 @@ async def check_gates(report: Report, only: str | None) -> None:
             ok, msg = tcp_probe(host, port)
             reach.message = msg
             if not ok:
-                reach.status = "FAIL"
-                reach.fix = f"ping {host}; check switch/cable; verify controller power"
+                # PCLess/Compass controllers accept a single TCP client: when
+                # the gate daemon already holds the socket our probe is refused
+                # even though the lane is healthy.
+                daemon_alive, _ = systemd_active(
+                    f"parking-daemon-gate-in@{code}.service"
+                )
+                if daemon_alive:
+                    reach.message = (
+                        f"{host}:{port} busy — held by "
+                        f"parking-daemon-gate-in@{code} (single-client controller)"
+                    )
+                else:
+                    reach.status = "FAIL"
+                    reach.fix = f"ping {host}; check switch/cable; verify controller power"
         elif dev:
             if Path(dev).exists():
                 reach.message = f"{dev} present @ {g['controller_baudrate'] or '?'} baud"

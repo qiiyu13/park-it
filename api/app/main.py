@@ -31,6 +31,111 @@ async def lifespan(app: FastAPI):
     from api.app.websocket.broadcaster import broadcaster
     await broadcaster.start()
 
+    # Seed settings that newer features expect. Idempotent; never overwrites an
+    # operator's choice.
+    try:
+        from sqlalchemy import select
+
+        from api.app.models.setting import Setting
+        from api.database import AsyncSessionLocal
+
+        defaults = [
+            (
+                "lane_reset_mode",
+                "time",
+                "string",
+                "Reset lane pakai apa (time / in3off / both)",
+                "time = timer saja; in3off = tunggu sinyal IN3OFF saja; both = reset setelah IN3OFF dan timer keduanya terpenuhi. Bisa dioverride per gate.",
+                "gate",
+            ),
+            (
+                "lane_reset_seconds",
+                "5",
+                "int",
+                "Jeda reset lane setelah kendaraan lewat (detik)",
+                "Nilai global. Bisa dioverride per gate di form Gate (Jeda reset lane). Setelah IN3 / palang terbuka, lane siap lagi setelah N detik walau controller tidak mengirim IN3OFF.",
+                "gate",
+            ),
+            (
+                "member_anti_passback",
+                "true",
+                "bool",
+                "Kartu member harus keluar dulu sebelum bisa masuk lagi",
+                "ON: satu kartu hanya boleh punya satu kendaraan di dalam. OFF: kartu boleh masuk lagi, dibatasi setting maksimal kendaraan per kartu.",
+                "member",
+            ),
+            (
+                "member_max_vehicles",
+                "1",
+                "int",
+                "Maksimal kendaraan per kartu (0 = tanpa batas)",
+                "Dipakai saat anti-passback dimatikan. Isi 1 untuk perilaku sama, 2+ untuk beberapa kendaraan per kartu, 0 untuk tanpa batas.",
+                "member",
+            ),
+            (
+                "snapshot_keep_months",
+                "6",
+                "int",
+                "Hapus Otomatis: simpan snapshot (bulan)",
+                "Snapshot disimpan semua selama N bulan terakhir, yang lebih lama dihapus otomatis. Isi 0 untuk menyimpan selamanya.",
+                "snapshot",
+            ),
+            (
+                "pos_plate_prefix",
+                "",
+                "string",
+                "Awalan plat nomor di POS keluar",
+                "Kode kota yang otomatis muncul di isian plat POS (mis. H). Kosongkan bila plat diketik penuh.",
+                "pos",
+            ),
+            (
+                "pos_auto_print_receipt",
+                "true",
+                "bool",
+                "Cetak nota otomatis di POS keluar",
+                "Matikan bila nota hanya dicetak saat operator menekan F12.",
+                "pos",
+            ),
+            (
+                "emoney_enabled",
+                "false",
+                "bool",
+                "Aktifkan pembayaran e-money",
+                "Matikan bila lane tidak punya reader e-money — tombol E-Money di POS akan disembunyikan.",
+                "payment",
+            ),
+            (
+                "cash_auto_open",
+                "true",
+                "bool",
+                "Palang otomatis terbuka setelah bayar tunai",
+                "Aktif: tunai dikonfirmasi langsung membuka palang. Matikan untuk kembali ke layar 'Buka Palang' + tekan Space.",
+                "payment",
+            ),
+        ]
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        async with AsyncSessionLocal() as db:
+            for key, value, vtype, label, desc, group in defaults:
+                # ON CONFLICT DO NOTHING: every uvicorn worker runs this hook,
+                # so a plain INSERT raced and logged UniqueViolation noise.
+                await db.execute(
+                    pg_insert(Setting.__table__)
+                    .values(
+                        key=key,
+                        value=value,
+                        value_type=vtype,
+                        label=label,
+                        description=desc,
+                        group=group,
+                        is_system=False,
+                    )
+                    .on_conflict_do_nothing(index_elements=["key"])
+                )
+            await db.commit()
+    except Exception as exc:  # seeding must never block startup
+        logger.warning("default_settings_seed_failed", error=str(exc))
+
     yield
 
     # Shutdown

@@ -54,11 +54,14 @@
     </section>
 
     <GateHeartbeatPanel />
+
+    <SetupChecklist v-if="authStore.isAdmin" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import SetupChecklist from '~/components/dashboard/SetupChecklist.vue'
 
 definePageMeta({
   middleware: 'auth',

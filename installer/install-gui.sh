@@ -84,10 +84,18 @@ ROLE=$(zenity --list --radiolist --title="$TITLE" --width=560 --height=300 \
     FALSE booth  "Booth PC only (connects to an existing server)") || exit 0
 
 if [[ "$ROLE" == "booth" ]]; then
-    IFS='|' read -r SRV TOK < <(zenity --forms --title="$TITLE" --text="Connect to the server" \
-        --add-entry="Server IP address" --add-entry="Enrollment token (shown on the server)") || exit 0
-    [[ -n "$SRV" && -n "$TOK" ]] || { zenity --error --text="Server IP and token are required."; exit 1; }
-    EXTRA=("--server-ip=$SRV" "--token=$TOK")
+    IFS='|' read -r SRV TOK BCODE BNAME GCODE < <(zenity --forms --title="$TITLE" \
+        --text="Hubungkan ke server. Isi kode booth yang unik dan gate keluar yang dilayani PC ini." \
+        --add-entry="IP server (mis. 192.168.1.80)" \
+        --add-entry="Token pendaftaran (dari server)" \
+        --add-entry="Kode booth (mis. BOOTH2)" \
+        --add-entry="Nama booth (mis. Keluar Mobil)" \
+        --add-entry="Kode gate keluar (mis. GOUT-01)") || exit 0
+    [[ -n "$SRV" && -n "$TOK" ]] || { zenity --error --text="Server IP dan token wajib diisi."; exit 1; }
+    BCODE=${BCODE:-BOOTH2}
+    BNAME=${BNAME:-Booth}
+    EXTRA=("--server-ip=$SRV" "--token=$TOK" "--booth-code=$BCODE" "--booth-name=$BNAME")
+    [[ -n "$GCODE" ]] && EXTRA+=("--gate-code=$GCODE")
 fi
 
 set +e

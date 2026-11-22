@@ -14,7 +14,9 @@ class CashPaymentRequest(BaseModel):
     transaction_id: int | None = Field(None, description="Transaction ID (optional)")
     barcode: str | None = Field(None, description="Ticket barcode")
     plate_number: str | None = Field(None, description="License plate")
-    paid_amount: int = Field(..., ge=0, description="Amount received from driver")
+    paid_amount: int | None = Field(
+        None, ge=0, description="Amount received from driver; omit to pay the exact fee"
+    )
     vehicle_type_id: int | None = Field(None, description="Vehicle type override for tariff calculation")
 
 
@@ -65,6 +67,7 @@ class TransactionLookupRequest(BaseModel):
     card_number: str | None = None
     plate_number: str | None = None
     vehicle_type_id: int | None = None
+    gate_out_id: int | None = Field(None, description="Exit gate doing the lookup")
 
 
 class CalculateFeeRequest(BaseModel):

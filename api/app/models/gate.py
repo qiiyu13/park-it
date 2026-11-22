@@ -85,3 +85,28 @@ class Gate(Base, IntPKMixin, TimestampMixin):
             for c in self.hardware_config.get("cameras", [])
             if c.get("url") and c.get("enabled", True)
         ]
+
+    @property
+    def camera_ids(self) -> list[int]:
+        """Camera records (cameras table) attached to this gate.
+
+        Devices are referenced by id so the same physical camera can be attached
+        to several gates/booths without duplicating its URL and credentials.
+        """
+        raw = self.hardware_config.get("camera_ids") or []
+        out: list[int] = []
+        for item in raw:
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    @property
+    def printer_id(self) -> int | None:
+        """Printer record (printers table) attached to this gate."""
+        raw = self.hardware_config.get("printer_id")
+        try:
+            return int(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            return None

@@ -7,7 +7,7 @@ from shared.logging import get_logger
 
 logger = get_logger("cleanup_worker")
 
-SNAPSHOT_RETENTION_DAYS = 30
+SNAPSHOT_RETENTION_MONTHS = 6
 SESSION_RETENTION_DAYS = 90
 PENDING_PAYMENT_TIMEOUT_MINUTES = 5
 
@@ -72,12 +72,41 @@ async def cleanup_old_sessions(ctx) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-async def cleanup_old_snapshots(ctx) -> dict:
-    """Delete expired snapshot files AND their database rows.
+async def _snapshot_retention_months(*, db_factory=None) -> int:
+    """Months of snapshots to keep (setting ``snapshot_keep_months``; 0 = forever)."""
+    from sqlalchemy import select
 
-    Filesystem-only cleanup left `snapshots` rows pointing at deleted files,
-    so /api/snapshots/{id}/image 404'd forever and the table grew without
-    bound. Rows are deleted, and any transaction pointer to them is cleared.
+    from api.app.models.setting import Setting
+
+    factory = db_factory
+    if factory is None:
+        from api.database import AsyncSessionLocal
+
+        factory = AsyncSessionLocal
+
+    try:
+        async with factory() as db:
+            raw = (
+                await db.execute(
+                    select(Setting.value).where(Setting.key == "snapshot_keep_months")
+                )
+            ).scalar_one_or_none()
+        if raw in (None, ""):
+            return SNAPSHOT_RETENTION_MONTHS
+        return max(0, int(str(raw).strip()))
+    except (ValueError, TypeError):
+        logger.warning("snapshot_retention_invalid_setting")
+    except Exception as e:
+        logger.warning("snapshot_retention_setting_read_failed", error=str(e))
+    return SNAPSHOT_RETENTION_MONTHS
+
+
+async def cleanup_old_snapshots(ctx) -> dict:
+    """Apply snapshot retention (Hapus Otomatis).
+
+    Every snapshot from the last ``months`` months is kept; anything older is
+    deleted (files + rows, transaction pointers nulled). A month is 30 days.
+    Files without a DB row (crashed jobs) are swept by mtime too.
     """
     from sqlalchemy import delete, select, update
 
@@ -85,15 +114,20 @@ async def cleanup_old_snapshots(ctx) -> dict:
     from api.database import AsyncSessionLocal
     from workers.critical.snapshot_worker import SNAPSHOT_DIR
 
-    cutoff = datetime.now(UTC) - timedelta(days=SNAPSHOT_RETENTION_DAYS)
-    logger.info("cleanup_snapshots_start", cutoff=cutoff.isoformat())
+    months = await _snapshot_retention_months(db_factory=AsyncSessionLocal)
+    if months == 0:
+        logger.info("cleanup_snapshots_disabled")
+        return {"status": "skipped", "reason": "retention is 0 (keep forever)"}
+
+    cutoff = datetime.now(UTC) - timedelta(days=30 * months)
+    logger.info("cleanup_snapshots_start", cutoff=cutoff.isoformat(), months=months)
 
     deleted_files = 0
     deleted_rows = 0
     try:
         snapshot_root = SNAPSHOT_DIR.resolve()
 
-        # Orphan files (no row, e.g. crashed job) are still swept by mtime.
+        # Orphan files (no row, e.g. crashed job) are swept by mtime.
         for filepath in SNAPSHOT_DIR.glob("*.jpg"):
             mtime = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
             if mtime < cutoff:
@@ -101,12 +135,12 @@ async def cleanup_old_snapshots(ctx) -> dict:
                 deleted_files += 1
 
         async with AsyncSessionLocal() as db:
-            rows = (
+            doomed = (
                 await db.execute(select(Snapshot).where(Snapshot.created_at < cutoff))
             ).scalars().all()
-            ids = [r.id for r in rows]
+            ids = [r.id for r in doomed]
 
-            for row in rows:
+            for row in doomed:
                 path = pathlib.Path(row.file_path)
                 try:
                     resolved = path.resolve()
@@ -136,15 +170,9 @@ async def cleanup_old_snapshots(ctx) -> dict:
         return {"status": "error", "message": str(e)}
 
     logger.info(
-        "cleanup_snapshots_complete",
-        deleted_files=deleted_files,
-        deleted_rows=deleted_rows,
+        "cleanup_snapshots_complete", deleted_files=deleted_files, deleted_rows=deleted_rows
     )
-    return {
-        "status": "success",
-        "deleted_files": deleted_files,
-        "deleted_rows": deleted_rows,
-    }
+    return {"status": "success", "deleted_files": deleted_files, "deleted_rows": deleted_rows}
 
 
 async def timeout_pending_payments(ctx) -> dict:

@@ -9,7 +9,7 @@ Business logic for processing payments at gate-out. This service:
 
 import json
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.models import Member
@@ -19,6 +19,7 @@ from api.app.services.transaction import (
     calculate_transaction_fee,
     complete_exit_transaction,
     find_active_transaction,
+    lane_vehicle_type_id,
 )
 from shared.events import DeductStatus
 from shared.logging import get_logger
@@ -88,13 +89,64 @@ async def _clear_emoney_pending(gate_id: str) -> None:
     await redis_client.delete(_emoney_pending_key(gate_id))
 
 
-async def _enqueue_print_receipt(db: AsyncSession, gate_id: str, transaction_data: dict) -> None:
+async def _setting_enabled(db: AsyncSession, key: str, default: bool = True) -> bool:
+    """Read a boolean setting row, falling back to a default when unset."""
+    from api.app.models.setting import Setting
+
+    row = (await db.execute(select(Setting).where(Setting.key == key))).scalar_one_or_none()
+    if row is None or row.value is None:
+        return default
+    return str(row.value).strip().lower() in ("1", "true", "yes", "on")
+
+
+async def _receipt_context(db: AsyncSession, gate, transaction_data: dict) -> dict:
+    """Add the receipt-layout name fields (gate/operator/vehicle) from DB.
+
+    The receipt call sites (cash, emoney, reprint) only carry times and fees;
+    the print worker needs names for the GATE/PETUGAS/JENIS lines.
+    """
+    from api.app.models import ParkingTransaction, User, VehicleType
+
+    transaction_data.setdefault("gate_name", gate.name)
+    tx_id = transaction_data.get("transaction_id")
+    if tx_id is not None:
+        tx = (
+            await db.execute(
+                select(ParkingTransaction).where(ParkingTransaction.id == tx_id)
+            )
+        ).scalar_one_or_none()
+        if tx is not None:
+            if tx.operator_id:
+                op = await db.get(User, tx.operator_id)
+                if op:
+                    transaction_data.setdefault("operator_name", op.full_name or op.username)
+            if tx.vehicle_type_id:
+                vt = await db.get(VehicleType, tx.vehicle_type_id)
+                if vt:
+                    transaction_data.setdefault("vehicle_type", vt.name)
+    return transaction_data
+
+
+async def _enqueue_print_receipt(
+    db: AsyncSession,
+    gate_id: str,
+    transaction_data: dict,
+    *,
+    unique: bool = False,
+    force: bool = False,
+) -> None:
     """Direct ARQ enqueue of exit receipt — bypasses gate_out daemon (attended exit).
 
-    Skips enqueue if the gate's receipt_printer peripheral is disabled.
+    Skips enqueue if the gate's receipt_printer peripheral is disabled or when
+    automatic receipt printing is turned off in settings (operator then uses
+    F12 in the POS to print it manually).
     """
     try:
-        from sqlalchemy import select
+        if not force and not await _setting_enabled(
+            db, "pos_auto_print_receipt", default=True
+        ):
+            logger.info("receipt_print_skipped_auto_disabled", gate_id=gate_id)
+            return
 
         from api.app.models import Gate
         from shared.redis import get_arq_redis
@@ -105,13 +157,15 @@ async def _enqueue_print_receipt(db: AsyncSession, gate_id: str, transaction_dat
             logger.info("receipt_print_skipped_disabled", gate_id=gate_id)
             return
 
+        await _receipt_context(db, gate, transaction_data)
+
         arq_redis = await get_arq_redis()
         tx_id = transaction_data.get("transaction_id")
         await arq_redis.enqueue_job(
             "print_receipt",
             gate_id=gate_id,
             transaction_data=transaction_data,
-            _job_id=f"receipt:{tx_id}" if tx_id else None,
+            _job_id=None if unique else (f"receipt:{tx_id}" if tx_id else None),
         )
         logger.info("receipt_job_enqueued", gate_id=gate_id, transaction_id=tx_id)
     except Exception as e:
@@ -130,7 +184,7 @@ async def process_cash_payment(
     barcode: str | None = None,
     card_number: str | None = None,
     plate_number: str | None = None,
-    paid_amount: int,
+    paid_amount: int | None = None,
     operator_id: int | None = None,
     vehicle_type_id: int | None = None,
 ) -> dict:
@@ -143,7 +197,7 @@ async def process_cash_payment(
         barcode: Transaction barcode
         card_number: Transaction card number
         plate_number: Transaction plate number
-        paid_amount: Amount received from driver
+        paid_amount: Amount received from driver; None = exact fee (server-computed)
         operator_id: POS operator ID
         vehicle_type_id: Vehicle type override (mixed-lane operator selection)
 
@@ -160,6 +214,15 @@ async def process_cash_payment(
     if tx is None:
         raise ValueError("No active transaction found")
 
+    # The POS keeps the plate the operator typed; cash tickets arrive without
+    # one, so store it instead of showing an empty plate on the receipt/kiosk.
+    if plate_number and not tx.plate_number:
+        tx.plate_number = plate_number.strip().upper()[:20]
+
+    # Operator pick wins; otherwise a single-type lane supplies the type, so the
+    # ticket is always priced and stored with a vehicle type.
+    if vehicle_type_id is None and tx.vehicle_type_id is None:
+        vehicle_type_id = await lane_vehicle_type_id(db, gate_out_id)
     if vehicle_type_id is not None:
         tx.vehicle_type_id = vehicle_type_id
         await db.flush()
@@ -167,6 +230,8 @@ async def process_cash_payment(
     await enqueue_snapshots_for_gate(db, gate_id, tx.id, "exit")
 
     fee = await calculate_transaction_fee(db, tx)
+    if paid_amount is None:
+        paid_amount = fee  # exact-fare payment: the server decides the amount
 
     # Trust boundary: never complete a cash exit for less than the fee.
     # ponytail: no partial-payment feature exists; add a partial path here if

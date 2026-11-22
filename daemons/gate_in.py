@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from typing import Any
 
 from daemons.base import BaseDaemon
@@ -51,8 +52,14 @@ STATE_OPENING = "OPENING"
 class GateInDaemon(BaseDaemon):
     """Gate-in daemon for vehicle entry processing."""
 
-    def __init__(self, gate_id: str, config: dict[str, Any]) -> None:
-        super().__init__(gate_id, config)
+    def __init__(
+        self,
+        gate_id: str,
+        config: dict[str, Any],
+        *,
+        config_loader=None,
+    ) -> None:
+        super().__init__(gate_id, config, config_loader=config_loader)
         self.hw = config.get("hardware_config", {})
         self.has_rfid = self.hw.get("rfid", {}).get("enabled", False)
         self.has_ticket_printer = self.hw.get("ticket_printer", {}).get("enabled", False)
@@ -63,6 +70,29 @@ class GateInDaemon(BaseDaemon):
         self._validating_task: asyncio.Task | None = None
         self._processing_task: asyncio.Task | None = None
         self._in1_on = False
+        # Momentary-button installs release IN1 immediately, so IN2 (ticket
+        # button) must not depend on _in1_on alone: remember when IN1 last
+        # fired and treat IN2 within this window as "vehicle present".
+        self._last_in1_at = 0.0
+        # IN3 loop detector + IN4 help button state/debounce.
+        self._loop_occupied = False
+        self._last_in3_at = 0.0
+        # Loop latch auto-clear (config: lane_reset_seconds). Controllers that
+        # never send IN3OFF would otherwise block the next vehicle until the
+        # hardcoded timeout (or forever). Tunable per site/gate.
+        try:
+            self._lane_reset_seconds = max(1, int(config.get("lane_reset_seconds") or 5))
+        except (TypeError, ValueError):
+            self._lane_reset_seconds = 5
+        # What may release the IN3 loop latch: "time", "in3off", or "both".
+        mode = str(config.get("lane_reset_mode") or "time").strip().lower()
+        self._lane_reset_mode = mode if mode in ("time", "in3off", "both") else "time"
+        self._loop_timer_done = False
+        self._loop_in3off = False
+        self._last_help_at = 0.0
+        # One ticket per IN1 cycle: IN1 arms the ticket button, IN2 consumes it.
+        self._ticket_armed = False
+        self._last_in2_at = 0.0
 
         # Circuit breaker for controller send: if N consecutive send errors,
         # fast-fail subsequent sends for `cooldown_s` instead of waiting for
@@ -138,6 +168,39 @@ class GateInDaemon(BaseDaemon):
             self.controller.close()
             self.controller = None
             logger.info("controller_disconnected", gate_id=self.gate_id)
+
+    async def _on_config_reloaded(self, connection_changed: bool) -> None:
+        """Apply admin edits in place; reconnect the controller if its link moved."""
+        self.hw = self.config.get("hardware_config", {})
+        self.has_rfid = self.hw.get("rfid", {}).get("enabled", False)
+        self.has_ticket_printer = self.hw.get("ticket_printer", {}).get("enabled", False)
+        try:
+            self._lane_reset_seconds = max(
+                1, int(self.config.get("lane_reset_seconds") or 5)
+            )
+        except (TypeError, ValueError):
+            self._lane_reset_seconds = 5
+        mode = str(self.config.get("lane_reset_mode") or "time").strip().lower()
+        self._lane_reset_mode = mode if mode in ("time", "in3off", "both") else "time"
+
+        if not connection_changed:
+            return
+
+        async with self._controller_lock:
+            await self._disconnect_controller()
+        # The RSS listener notices the dead socket and reconnects using the new
+        # protocol/host/port within ~0.5s. Reset the fast-fail breaker so the
+        # first command after an edit is not dropped.
+        self._cb_fail_count = 0
+        self._cb_open_until = 0.0
+        logger.info(
+            "controller_reconnect_for_config",
+            gate_id=self.gate_id,
+            protocol=self.config.get("protocol"),
+            host=self.config.get("controller_host"),
+            port=self.config.get("controller_port"),
+            device=self.config.get("controller_device"),
+        )
 
     # ------------------------------------------------------------------
     # Relay mode helpers
@@ -280,42 +343,112 @@ class GateInDaemon(BaseDaemon):
 
         if "IN1ON" in text:
             self._in1_on = True
+            self._last_in1_at = time.monotonic()
+            logger.info(
+                "input_event", gate_id=self.gate_id, input="IN1",
+                state=self.state, loop_occupied=self._loop_occupied,
+            )
+            if (
+                self._loop_occupied
+                and self._lane_reset_mode == "time"
+                and time.monotonic() - self._last_in3_at > self._lane_reset_seconds
+            ):
+                # Missed timer task (e.g. daemon hiccup): don't leave the lane
+                # latched forever. Only safe in pure timer mode.
+                self._loop_occupied = False
+                self._loop_timer_done = False
+                self._loop_in3off = False
+                logger.info(
+                    "loop_auto_cleared",
+                    gate_id=self.gate_id,
+                    seconds=self._lane_reset_seconds,
+                    mode=self._lane_reset_mode,
+                )
+            if self._loop_occupied:
+                logger.info("in1_ignored_loop_occupied", gate_id=self.gate_id)
+                await self._send_controller_command(cmd_ack("IN1ON"))
+                return
             await self._send_controller_command(cmd_ack("IN1ON"))
             if self.state == STATE_IDLE:
+                self._ticket_armed = True
                 await self._on_vehicle_detected()
 
         elif "IN1OFF" in text:
             self._in1_on = False
+            logger.info("input_event", gate_id=self.gate_id, input="IN1OFF", state=self.state)
             await self._send_controller_command(cmd_ack("IN1OFF"))
-            if self.state == STATE_WAITING_INPUT:
+            # A momentary button releases within milliseconds — don't treat
+            # that release as "vehicle backed up" and drop the lane to IDLE.
+            pressed_for = time.monotonic() - self._last_in1_at
+            if self.state == STATE_WAITING_INPUT and pressed_for > 2.0:
                 await self._on_vehicle_backed_up()
             elif self.state == STATE_OPENING:
                 await self._on_vehicle_passed()
 
         elif "IN2ON" in text:
+            logger.info(
+                "input_event",
+                gate_id=self.gate_id,
+                input="IN2",
+                state=self.state,
+                armed=self._ticket_armed,
+            )
             await self._send_controller_command(cmd_ack("IN2ON"))
-            if not self._in1_on:
-                logger.info("in2_ignored_no_vehicle", gate_id=self.gate_id, state=self.state)
+            # The field flow is strictly: IN1 (vehicle) -> one IN2 press -> ticket.
+            # The controller sends no IN2OFF, so one press is one IN2ON frame;
+            # debounce repeated frames of the same press.
+            if time.monotonic() - self._last_in2_at < 3.0:
+                logger.info("in2_debounced", gate_id=self.gate_id)
                 return
-            if self.state == STATE_WAITING_INPUT:
-                await self._on_ticket_button_pressed()
+            self._last_in2_at = time.monotonic()
+            # Strict: the vehicle must be ON the loop right now (IN1 asserted).
+            # A released IN1 means the car moved on — a later IN2 must not print.
+            if not self._in1_on:
+                self._ticket_armed = False
+            if not self._ticket_armed or not self._in1_on or self.state != STATE_WAITING_INPUT:
+                logger.info(
+                    "in2_ignored_not_armed",
+                    gate_id=self.gate_id,
+                    armed=self._ticket_armed,
+                    state=self.state,
+                )
+                return
+            self._ticket_armed = False
+            await self._on_ticket_button_pressed()
 
         elif "IN3ON" in text:
+            # IN3 = vehicle loop detector behind the barrier. One pass = one
+            # transaction: the loop resets the lane to IDLE and marks the loop
+            # occupied so a second IN1 cannot start another transaction while
+            # the same vehicle still sits on the loop.
             await self._send_controller_command(cmd_ack("IN3ON"))
-            if self.state == STATE_WAITING_INPUT:
-                await self._on_help_button()
+            logger.info(
+                "input_event", gate_id=self.gate_id, input="IN3_LOOP",
+                state=self.state, loop_occupied=self._loop_occupied,
+            )
+            if time.monotonic() - self._last_in3_at < 2.0:
+                return  # contact bounce / duplicate frame
+            self._last_in3_at = time.monotonic()
+            self._loop_occupied = True
+            self._loop_timer_done = False
+            self._loop_in3off = False
+            await self._on_vehicle_passed()
+
+        elif "IN3OFF" in text:
+            # Loop released — the vehicle has fully cleared the lane.
+            await self._send_controller_command(cmd_ack("IN3OFF"))
+            logger.info("input_event", gate_id=self.gate_id, input="IN3_LOOP_OFF", state=self.state)
+            self._loop_in3off = True
+            self._maybe_clear_loop()
 
         elif "IN4ON" in text:
+            # IN4 = help button. Never touches the transaction or the barrier.
             await self._send_controller_command(cmd_ack("IN4ON"))
-            if self.state == STATE_WAITING_INPUT:
-                await self._on_reset()
-            elif self.state == STATE_OPENING:
-                await self._on_vehicle_passed()
-
-        elif "IN4OFF" in text:
-            await self._send_controller_command(cmd_ack("IN4OFF"))
-            if self.state == STATE_OPENING:
-                await self._on_vehicle_passed()
+            logger.info("input_event", gate_id=self.gate_id, input="IN4_HELP", state=self.state)
+            if time.monotonic() - self._last_help_at < 10.0:
+                return
+            self._last_help_at = time.monotonic()
+            await self._on_help_button()
 
         else:
             parsed = parse_stat(msg)
@@ -328,11 +461,19 @@ class GateInDaemon(BaseDaemon):
                     x=parsed["wiegand_x"],
                 )
                 await self._send_controller_command(cmd_ack("W"))
-                if self.state == STATE_WAITING_INPUT and self.has_rfid:
-                    if parsed["wiegand_w"]:
-                        await self._on_rfid_card_read(parsed["wiegand_w"], "W")
-                    elif parsed["wiegand_x"]:
-                        await self._on_rfid_card_read(parsed["wiegand_x"], "X")
+                if self.has_rfid:
+                    vehicle_present = self._in1_on
+                    if not vehicle_present:
+                        logger.info(
+                            "rfid_ignored_no_vehicle",
+                            gate_id=self.gate_id,
+                            state=self.state,
+                        )
+                    elif self.state == STATE_WAITING_INPUT:
+                        if parsed["wiegand_w"]:
+                            await self._on_rfid_card_read(parsed["wiegand_w"], "W")
+                        elif parsed["wiegand_x"]:
+                            await self._on_rfid_card_read(parsed["wiegand_x"], "X")
 
     # ------------------------------------------------------------------
     # State transition handlers
@@ -346,32 +487,37 @@ class GateInDaemon(BaseDaemon):
         )
         audio_cfg = self.hw.get("audio", {})
         if audio_cfg.get("enabled", True):
-            track = audio_cfg.get("welcome_track", 1)
+            track = audio_cfg.get("welcome_track", 7)  # 7 = "Selamat datang"
             await self._cmd_play_audio(track)
         await self._display("Selamat Datang", "Tombol/Tempel Kartu")
 
     async def _on_vehicle_backed_up(self) -> None:
         """Vehicle reversed before completing entry."""
+        self._ticket_armed = False
         await self._transition(STATE_IDLE)
         await self._display()
         logger.info("vehicle_backed_up", gate_id=self.gate_id)
 
     async def _on_reset(self) -> None:
         """IN4 triggered during input wait — reset to IDLE."""
+        self._ticket_armed = False
         await self._transition(STATE_IDLE)
         await self._display()
         logger.info("gate_reset_by_sensor", gate_id=self.gate_id)
 
     async def _on_help_button(self) -> None:
-        """IN3 help button — alert operator, hold 10s, reset."""
-        await self._cmd_play_audio(5)
+        """IN4 help button — call the operator, never touch the transaction.
+
+        The old version forced STATE_IDLE after 10s, which silently dropped a
+        pending WAITING_INPUT/PROCESSING ticket if the driver pressed help
+        while paying. Help must be informational only.
+        """
+        await self._cmd_play_audio(5)  # "Mohon tunggu"
         await self._display("Mohon Tunggu", "Petugas Membantu Anda")
         await self.publish_event(
             BaseEvent(event_type="help_button_pressed", gate_id=self.gate_id)
         )
-        await asyncio.sleep(10)
-        await self._transition(STATE_IDLE)
-        await self._display()
+        logger.info("help_button_called", gate_id=self.gate_id, state=self.state)
 
     async def _on_ticket_button_pressed(self) -> None:
         """Cash button pressed — notify API to create transaction and print."""
@@ -432,12 +578,51 @@ class GateInDaemon(BaseDaemon):
             await self._on_vehicle_passed()
 
     async def _on_vehicle_passed(self) -> None:
+        self._ticket_armed = False
         await self._transition(STATE_IDLE)
         await self.publish_event(
             BaseEvent(event_type="vehicle_passed", gate_id=self.gate_id)
         )
         await self._display()
         await self._relay_close()
+        self._loop_timer_done = False
+        # Arm the lane for the next vehicle on a timer as well: some
+        # controllers never emit IN3OFF, and waiting for it would leave the
+        # loop latched. Skipped in IN3OFF-only mode.
+        if self._lane_reset_mode != "in3off":
+            self._schedule_loop_clear()
+        else:
+            self._maybe_clear_loop()
+
+    def _schedule_loop_clear(self) -> None:
+        self._spawn_tracked(self._clear_loop_after_delay(), name="loop_clear")
+
+    async def _clear_loop_after_delay(self) -> None:
+        await asyncio.sleep(self._lane_reset_seconds)
+        self._loop_timer_done = True
+        self._maybe_clear_loop()
+
+    def _maybe_clear_loop(self) -> None:
+        """Release the IN3 latch according to lane_reset_mode."""
+        if not self._loop_occupied:
+            return
+        mode = self._lane_reset_mode
+        release = (
+            (mode == "time" and self._loop_timer_done)
+            or (mode == "in3off" and self._loop_in3off)
+            or (mode == "both" and self._loop_timer_done and self._loop_in3off)
+        )
+        if not release:
+            return
+        self._loop_occupied = False
+        self._loop_timer_done = False
+        self._loop_in3off = False
+        logger.info(
+            "loop_auto_cleared",
+            gate_id=self.gate_id,
+            seconds=self._lane_reset_seconds,
+            mode=mode,
+        )
 
     # ------------------------------------------------------------------
     # Command handlers (from Redis Streams)
@@ -498,7 +683,7 @@ class GateInDaemon(BaseDaemon):
             logger.error("gate_open_failed_hard", gate_id=self.gate_id)
             await self.publish_event(BaseEvent(event_type="gate_open_failed", gate_id=self.gate_id))
             return False
-        await self._cmd_play_audio(9)  # terima_kasih
+        await self._cmd_play_audio(6)  # 6 = "Terima kasih"
         await self._on_gate_opened()
         return True
 
@@ -550,30 +735,65 @@ class GateInDaemon(BaseDaemon):
         if not self.has_ticket_printer:
             logger.info("cash_ticket_print_skipped_disabled", gate_id=self.gate_id, barcode=barcode)
             if audio_cfg.get("enabled", True):
-                await self._cmd_play_audio(audio_cfg.get("ticket_track", 2))
+                await self._cmd_play_audio(audio_cfg.get("ticket_track", 2))  # 2 = "Silakan ambil tiket"
             return await self._cmd_open_gate()
 
         print_success = False
+        printer_cfg = self.config.get("printer") or {}
+        printer_mode = (printer_cfg.get("mode") or "AUTO").upper()
+        if printer_mode == "AUTO":
+            # Resolve per ticket: a swapped cable (network ↔ serial ↔ behind
+            # controller) starts working without editing settings.
+            import socket
+            from pathlib import Path as _Path
+
+            ip, port = printer_cfg.get("ip_address"), printer_cfg.get("port") or 9100
+            serial_dev = printer_cfg.get("serial_device")
+            printer_mode = "CONTROLLER_PASSTHROUGH"
+            if ip:
+                try:
+                    with socket.create_connection((ip, int(port)), timeout=1.0):
+                        printer_mode = "NETWORK"
+                except OSError:
+                    pass
+            if printer_mode == "CONTROLLER_PASSTHROUGH" and serial_dev:
+                try:
+                    if str(serial_dev).startswith("/dev/usb/lp") and _Path(serial_dev).exists():
+                        printer_mode = "USB"
+                    elif _Path(serial_dev).exists():
+                        printer_mode = "SERIAL"
+                except OSError:
+                    pass
+            logger.info("printer_mode_auto_resolved", gate_id=self.gate_id, mode=printer_mode)
         try:
-            from datetime import datetime
-            timestamp_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            escpos_data = b"".join([
-                b"\x1b\x61\x01",
-                b"TIKET PARKIR\n",
-                b"\x1b\x61\x00",
-                f"GATE    : {gate_name}\n".encode(),
-                f"TANGGAL : {timestamp_str}\n".encode(),
-                b"\x1b\x61\x01",
-                b"\x1d\x68\x64",
-                b"\x1d\x48\x02",
-                b"\x1d\x6b\x45",
-                bytes([len(barcode)]) + barcode.encode() + b"\x00",
-                b"\n\x1d\x56\x41",
-            ])
-            await self._send_controller_command(cmd_pr3(escpos_data))
-            await asyncio.sleep(1.5)
-            print_success = True
-            logger.info("cash_ticket_printed", gate_id=self.gate_id, barcode=barcode)
+            if printer_mode in ("NETWORK", "SERIAL", "USB"):
+                # The physical printer is not behind the controller. Only the
+                # print worker knows how to talk to it (python-escpos / serial),
+                # so hand the job over instead of sending PR3 into the PCLess.
+                await self._cmd_print_ticket(barcode, gate_name)
+                await asyncio.sleep(2.0)
+                print_success = True
+                logger.info(
+                    "cash_ticket_handed_to_worker",
+                    gate_id=self.gate_id,
+                    barcode=barcode,
+                    printer_mode=printer_mode,
+                )
+            else:
+                # Single source of truth for the ticket layout (centering
+                # without ESC a, ESC @ init, barcode, footer).
+                from workers.critical.print_worker import _build_escpos_ticket
+
+                site = self.config.get("site_name") or ""
+                escpos_data = _build_escpos_ticket(
+                    barcode=barcode,
+                    gate_name=gate_name,
+                    location_name=site,
+                )
+                await self._send_controller_command(cmd_pr3(escpos_data))
+                await asyncio.sleep(1.5)
+                print_success = True
+                logger.info("cash_ticket_printed", gate_id=self.gate_id, barcode=barcode)
         except Exception as e:
             logger.error("cash_ticket_print_failed", gate_id=self.gate_id, barcode=barcode, error=str(e))
 
@@ -585,7 +805,7 @@ class GateInDaemon(BaseDaemon):
                 await self._cmd_play_audio(audio_cfg.get("error_track", 11))
         else:
             if audio_cfg.get("enabled", True):
-                await self._cmd_play_audio(audio_cfg.get("ticket_track", 2))
+                await self._cmd_play_audio(audio_cfg.get("ticket_track", 2))  # 2 = "Silakan ambil tiket"
 
         return await self._cmd_open_gate()
 
@@ -633,8 +853,16 @@ class GateInDaemon(BaseDaemon):
                 while self._running:
                     raw = await loop.run_in_executor(None, ser.readline)
                     card_number = raw.decode("ascii", errors="ignore").strip()
-                    if card_number and self.state == STATE_WAITING_INPUT and self.has_rfid:
-                        await self._on_rfid_card_read(card_number, "S")
+                    if card_number and self.has_rfid:
+                        vehicle_present = self._in1_on
+                        if vehicle_present and self.state == STATE_WAITING_INPUT:
+                            await self._on_rfid_card_read(card_number, "S")
+                        elif not vehicle_present:
+                            logger.info(
+                                "rfid_serial_ignored_no_vehicle",
+                                gate_id=self.gate_id,
+                                card=card_number,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception as e:

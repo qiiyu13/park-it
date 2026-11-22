@@ -14,6 +14,7 @@ const ADMIN_ONLY_PREFIXES = [
   '/member',
   '/report',
   '/personnel',   // user management — admin only
+  '/snapshots',   // archive delete/purge — admin only
 ]
 
 const OPERATOR_HOME = '/pos'
@@ -34,6 +35,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (to.path === '/setup' || to.path.startsWith('/setup/')) return
 
   const authStore = useAuthStore()
+
+  // Forced user switch: drop the current session (operator -> admin is the
+  // common case on a shared PC) and let the login page render.
+  if (to.path === '/login' && to.query.switch) {
+    if (authStore.isLoggedIn) {
+      await authStore.logout()
+    }
+    return
+  }
 
   const publicRoutes = ['/login']
 

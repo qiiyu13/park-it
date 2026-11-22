@@ -55,7 +55,15 @@
           <div class="px-3 py-2 font-mono text-sm font-medium text-foreground">{{ row.key }}</div>
           <div class="px-3 py-2 text-sm font-medium text-foreground">{{ row.label }}</div>
           <div class="px-3 py-2">
-            <input v-model="row.value" class="form-control w-full" @blur="saveSetting(row)" >
+            <input
+              v-if="row.value_type === 'bool'"
+              type="checkbox"
+              class="h-5 w-5 accent-primary"
+              :checked="row.value === 'true'"
+              @change="onToggleSetting(row, $event.target.checked)"
+            >
+            <input v-else v-model="row.value" class="form-control w-full" @blur="saveSetting(row)" >
+            <p v-if="row.description" class="mt-1 text-[11px] text-muted-foreground">{{ row.description }}</p>
           </div>
           <div class="px-3 py-2">
             <span class="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{{ row.group }}</span>
@@ -203,13 +211,24 @@ const loadingVehicleTypes = ref(false)
 const vehicleTypeModalVisible = ref(false)
 const vehicleTypeEditing = ref(false)
 const vehicleTypeForm = ref({})
+const TARIFF_MODES = [
+  { label: 'Tetap per kunjungan (flat)', value: 'flat' },
+  { label: 'Per jam (tiap jam sama)', value: 'hourly' },
+  { label: 'Jam pertama + jam berikutnya', value: 'progressive' },
+]
+const TARIFF_MODE_LABEL = {
+  flat: 'Tetap per kunjungan',
+  hourly: 'Per jam',
+  progressive: 'Jam pertama + berikutnya',
+}
 const vehicleTypeColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
   { prop: 'code', label: 'Kode', width: 100, sortable: true },
   { prop: 'base_tariff', label: 'Tarif Dasar', width: 120, formatter: (v) => formatCurrency(v) },
   { prop: 'hourly_rate', label: 'Tarif/jam', width: 120, formatter: (v) => formatCurrency(v) },
   { prop: 'max_daily_cap', label: 'Maks Harian', width: 120, formatter: (v) => formatCurrency(v) },
-  { prop: 'is_progressive', label: 'Progresif', type: 'boolean', width: 100 },
+  { prop: 'tariff_mode', label: 'Mode Tarif', width: 190, formatter: (v) => TARIFF_MODE_LABEL[v] || v },
+  { prop: 'grace_period_minutes', label: 'Gratis (menit)', width: 120 },
 ]
 const vehicleTypeFields = [
   { prop: 'name', label: 'Nama', type: 'text', required: true },
@@ -220,7 +239,8 @@ const vehicleTypeFields = [
   { prop: 'lost_ticket_penalty', label: 'Denda Tiket Hilang (IDR)', type: 'number' },
   { prop: 'overnight_mode', label: 'Mode Malam', type: 'select', options: [{ label: 'Midnight', value: 'midnight' }, { label: '24 Jam', value: '24h' }, { label: 'Tidak Ada', value: 'none' }] },
   { prop: 'overnight_tariff', label: 'Tarif Malam (IDR)', type: 'number' },
-  { prop: 'is_progressive', label: 'Tarif Progresif', type: 'boolean' },
+  { prop: 'tariff_mode', label: 'Mode Tarif', type: 'select', options: TARIFF_MODES },
+  { prop: 'grace_period_minutes', label: 'Gratis Berapa Menit (0 = bayar dari awal)', type: 'number' },
 ]
 
 const shifts = ref([])
@@ -322,7 +342,7 @@ async function loadGates() {
 
 onMounted(() => { loadSiteConfig(); loadSettings(); loadVehicleTypes(); loadShifts(); loadAreas(); loadGates() })
 
-async function loadSiteConfig() { try { const { data } = await fetchApi('/api/site-config'); siteConfig.value = data } catch { /* ok */ } }
+async function loadSiteConfig() { try { const res = await fetchApi('/api/site-config'); siteConfig.value = res?.data ?? res } catch { /* ok */ } }
 async function saveSiteConfig() {
   try {
     await fetchApi('/api/site-config', { method: 'PUT', body: JSON.stringify(siteConfig.value) })
@@ -338,6 +358,10 @@ async function loadSettings() {
     settings.value = await fetchApi('/api/settings')
     for (const row of settings.value) _settingOriginals[row.key] = row.value
   } catch (e) { console.error(e) }
+}
+async function onToggleSetting(row, checked) {
+  row.value = checked ? 'true' : 'false'
+  await saveSetting(row)
 }
 async function saveSetting(row) {
   const original = _settingOriginals[row.key]

@@ -1,8 +1,26 @@
 """POS Pydantic schemas."""
 
+import ipaddress
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def canonical_ip(value: str | None) -> str | None:
+    """Normalise an IPv4/IPv6 string.
+
+    The booth wizard used to store "192.168.1.081", which never matched the
+    real client address 192.168.1.81 and locked the POS out of its own booth.
+    """
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return raw
+    try:
+        return str(ipaddress.ip_address(raw))
+    except ValueError:
+        return raw
 
 
 class PosBase(BaseModel):
@@ -14,6 +32,11 @@ class PosBase(BaseModel):
     default_gate_id: int | None = None
     booth_peripherals: dict = Field(default_factory=dict)
     is_active: bool = True
+
+    @field_validator("ip_address")
+    @classmethod
+    def _normalise_ip(cls, v: str | None) -> str | None:
+        return canonical_ip(v)
 
 
 class PosCreate(PosBase):
@@ -31,6 +54,11 @@ class PosUpdate(BaseModel):
     default_gate_id: int | None = None
     booth_peripherals: dict | None = None
     is_active: bool | None = None
+
+    @field_validator("ip_address")
+    @classmethod
+    def _normalise_ip(cls, v: str | None) -> str | None:
+        return canonical_ip(v)
 
 
 class PosResponse(PosBase):
@@ -56,6 +84,11 @@ class BoothRegisterRequest(BaseModel):
     ip_address: str | None = Field(None, max_length=45)
     default_gate_code: str | None = Field(None, max_length=20)
 
+    @field_validator("ip_address")
+    @classmethod
+    def _normalise_ip(cls, v: str | None) -> str | None:
+        return canonical_ip(v)
+
 
 class BoothHeartbeat(BaseModel):
     """Booth-self-reported snapshot posted every 15s by booth_bridge.
@@ -79,3 +112,15 @@ class BoothHeartbeatResponse(BaseModel):
 
     booth_code: str
     last_seen_at: datetime
+
+
+class ReprintReceiptRequest(BaseModel):
+    """Print the receipt of the last completed transaction at a gate."""
+
+    gate_id: int
+
+
+class PendingOpenRequest(BaseModel):
+    """Poll for an admin-queued gate open (booth bridge)."""
+
+    booth_code: str = Field(..., max_length=20)

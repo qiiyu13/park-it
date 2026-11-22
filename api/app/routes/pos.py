@@ -1,5 +1,6 @@
 """POS (booth) management routes."""
 
+import json
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.api_key import require_api_key
-from api.app.middleware.auth import require_admin, require_auth
+from api.app.middleware.auth import require_admin, require_auth, require_operator
 from api.app.models.gate import Gate
 from api.app.models.parking_transaction import ParkingTransaction
 from api.app.models.pos import Pos
@@ -20,11 +21,14 @@ from api.app.schemas.pos import (
     PosCreate,
     PosResponse,
     PosUpdate,
+    ReprintReceiptRequest,
+    PendingOpenRequest,
 )
 from api.app.services.shift_utils import get_current_shift
 from api.database import get_db
 from shared.config import get_settings
 from shared.logging import get_logger
+from shared.redis import redis_client
 
 logger = get_logger("pos_routes")
 router = APIRouter(prefix="/pos", tags=["POS / Booth"])
@@ -60,6 +64,24 @@ async def get_pos_by_ip(
         # For local development, return the first active POS
         result = await db.execute(select(Pos).where(Pos.is_active.is_(True)).limit(1))
         pos = result.scalar_one_or_none()
+
+    # Single-booth fallback: a cashier PC can have several NIC addresses (or a
+    # DHCP lease change), so an exact IP match is not always possible. With
+    # exactly one active booth there is no ambiguity about which lane owns it.
+    if pos is None:
+        active = (
+            (await db.execute(select(Pos).where(Pos.is_active.is_(True))))
+            .scalars()
+            .all()
+        )
+        if len(active) == 1:
+            pos = active[0]
+            logger.warning(
+                "pos_detected_single_booth_fallback",
+                pos_id=pos.id,
+                code=pos.code,
+                ip=client_ip,
+            )
 
     if pos is None:
         raise HTTPException(
@@ -290,3 +312,100 @@ async def delete_pos(
     await db.commit()
     logger.info("pos_deleted", pos_id=pos_id)
     return SuccessResponse(message="POS deleted")
+
+
+@router.post("/reprint-receipt")
+async def reprint_last_receipt(
+    payload: ReprintReceiptRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_operator),
+) -> dict:
+    """Print the receipt for the last completed transaction at this gate (F12)."""
+    gate = await db.get(Gate, payload.gate_id)
+    if gate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+
+    tx = (
+        await db.execute(
+            select(ParkingTransaction)
+            .where(
+                ParkingTransaction.gate_out_id == gate.id,
+                ParkingTransaction.status == "COMPLETED",
+            )
+            .order_by(
+                ParkingTransaction.exit_time.desc().nullslast(),
+                ParkingTransaction.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if tx is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Belum ada transaksi selesai di gate ini",
+        )
+
+    from api.app.services.payment import _enqueue_print_receipt
+
+    await _enqueue_print_receipt(
+        db,
+        gate.code,
+        {
+            "transaction_id": tx.id,
+            "barcode": tx.barcode,
+            "plate_number": tx.plate_number,
+            "entry_time": tx.entry_time.isoformat() if tx.entry_time else None,
+            "exit_time": tx.exit_time.isoformat() if tx.exit_time else None,
+            "fee": tx.fee or 0,
+            "paid_amount": tx.paid_amount or 0,
+            "payment_method": tx.payment_method,
+        },
+        # Reprints are operator-triggered: they must ignore the auto-print
+        # setting and must not be swallowed by ARQ's per-transaction job id.
+        unique=True,
+        force=True,
+    )
+    logger.info("receipt_reprint_queued", gate_id=gate.code, transaction_id=tx.id)
+    return {"success": True, "transaction_id": tx.id}
+
+
+@router.post("/pending-open")
+async def take_pending_open(
+    payload: PendingOpenRequest,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_api_key),
+) -> dict:
+    """Booth bridge poller: take a queued open for any OUT gate of this booth.
+
+    Admin can open either lane (Kasir Mobil / Kasir Motor); both share the
+    booth's relay, so the poller must look at every OUT gate assigned to the
+    booth, not just its default lane.
+    """
+    pos = (
+        await db.execute(select(Pos).where(Pos.code == payload.booth_code))
+    ).scalar_one_or_none()
+    if pos is None:
+        return {"command": None}
+
+    gate_codes = (
+        await db.execute(
+            select(Gate.code)
+            .where(
+                Gate.pos_id == pos.id,
+                Gate.direction == "OUT",
+                Gate.protocol == "serial",
+            )
+            .order_by(Gate.code.asc())
+        )
+    ).scalars().all()
+
+    await redis_client.connect()
+    for code in gate_codes:
+        raw = await redis_client.client.getdel(f"gate:pending_open:{code}")
+        if not raw:
+            continue
+        try:
+            return {"command": json.loads(raw)}
+        except json.JSONDecodeError:
+            continue
+    return {"command": None}

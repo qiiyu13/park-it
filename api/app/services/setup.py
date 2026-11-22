@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import secrets
 import shlex
+import shutil
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -182,8 +183,11 @@ async def detect_topology() -> SETUP_TOPOLOGY:
     """Best-effort topology detection from systemd + udev symlinks."""
 
     async def unit_active(name: str) -> bool:
+        # Absolute path: the systemd unit's PATH is minimal, and a bare
+        # "systemctl" raised FileNotFoundError → 500 on /api/setup/state.
+        systemctl = shutil.which("systemctl") or "/usr/bin/systemctl"
         proc = await asyncio.create_subprocess_exec(
-            "systemctl",
+            systemctl,
             "is-active",
             name,
             stdout=asyncio.subprocess.PIPE,

@@ -109,7 +109,7 @@ def _notes_text(
                 name=item["name"],
                 hourly=int(item.get("hourly_rate", 0)),
                 cap=int(item.get("max_daily_cap", 0)),
-                prog=" progressive" if item.get("is_progressive") else "",
+                prog=" progressive" if item.get("tariff_mode") == "progressive" else "",
             )
         )
     lines += ["", "Next steps:"]

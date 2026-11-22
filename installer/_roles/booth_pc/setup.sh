@@ -84,7 +84,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if ! grep -q "Ubuntu 24.04" /etc/os-release 2>/dev/null; then
-    warn "This script targets Ubuntu 24.04 LTS (ships python3.12 natively). Continuing anyway..."
+    warn "This script targets Ubuntu 24.04+ (ships python3.12+). Continuing anyway..."
     warn "On 22.04 the python3.12 packages below are NOT in the default repos and install will fail."
     if ! $NON_INTERACTIVE; then
         read -rp "Press Enter to continue or Ctrl+C to abort..."
@@ -122,7 +122,7 @@ phase_install() {
     fi
 
     apt-get install -y -qq \
-        python3.12 python3.12-venv python3.12-dev python3-pip \
+        python3 python3-venv python3-dev python3-pip \
         curl wget git unzip rsync
 
     if ! command -v google-chrome &>/dev/null; then
@@ -184,7 +184,7 @@ EOF
 
     cd "$PROJECT_ROOT"
     if [[ ! -d ".venv" ]]; then
-        sudo -u parking python3.12 -m venv .venv
+        sudo -u parking python3 -m venv .venv
     fi
     sudo -u parking .venv/bin/pip install --quiet --upgrade pip
     # Always full install: booth_bridge's omnikey_poller needs evdev, and the
@@ -563,7 +563,7 @@ EOF
 [Desktop Entry]
 Name=Parking POS
 Comment=E-Parking POS System
-Exec=/usr/bin/google-chrome --app=http://${SERVER_IP}/pos --start-fullscreen --no-first-run --no-default-browser-check --kiosk --disable-infobars
+Exec=/usr/bin/google-chrome --ignore-certificate-errors --app=https://${SERVER_IP}/pos --start-fullscreen --no-first-run --no-default-browser-check --disable-infobars
 Icon=/usr/share/icons/hicolor/256x256/apps/google-chrome.png
 Type=Application
 Terminal=false

@@ -38,9 +38,15 @@ class VehicleType(Base, IntPKMixin, TimestampMixin):
         Integer, default=0, nullable=False
     )
 
-    # Progressive pricing flag
-    is_progressive: Mapped[bool] = mapped_column(
-        default=False, nullable=False
+    # Pricing mode: "flat" (one fixed fee per visit), "hourly" (same rate per
+    # started hour) or "progressive" (first hour base_tariff, then hourly_rate).
+    tariff_mode: Mapped[str] = mapped_column(
+        String(20), default="hourly", server_default="hourly", nullable=False
+    )
+
+    # Stays at or under this many minutes are free (0 = pay from minute one).
+    grace_period_minutes: Mapped[int] = mapped_column(
+        Integer, default=15, server_default="15", nullable=False
     )
 
     def __repr__(self) -> str:

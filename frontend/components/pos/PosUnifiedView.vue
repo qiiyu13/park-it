@@ -1,5 +1,5 @@
 <template>
-  <!-- IDLE: ambient clock view -->
+  <!-- IDLE: same cashier form, values stay empty until a ticket is scanned -->
   <PosIdleAmbient
     v-if="!hasTransaction"
     :cameras="cameras"
@@ -7,93 +7,126 @@
     :transaction-count="transactionCount"
     :cash-collected="cashCollected"
     :last-entry="lastEntry"
+    :show-plate="showPlate"
+    :plate-prefix="platePrefix"
+    :tariff="null"
+    :vehicle-type-name="resolvedLaneVehicleTypeName"
     @barcode-lookup="(v) => $emit('barcode-lookup', v)"
+    @plate-lookup="(v) => $emit('plate-lookup', v)"
+    @manual-open="$emit('manual-open')"
+    @reprint-receipt="$emit('reprint-receipt')"
+    @gate-open="$emit('gate-open')"
   />
 
-  <!-- ACTIVE: transaction layout (wireframe redesign) -->
+  <!-- ACTIVE: v1-style vertical rows: plat → tiket → jenis → jam → durasi → tarif -->
   <div v-else class="flex h-full min-h-0 gap-4 p-4 overflow-hidden">
-    <!-- Left: Main transaction stage -->
-    <div class="flex flex-1 min-h-0 flex-col">
-      <!-- Top row: meta (left) + scan-plat chip (right) -->
-      <div class="flex items-start justify-between gap-4 flex-shrink-0">
-        <div class="flex items-start gap-6">
-          <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Durasi</span>
-            <span class="mt-1 flex h-9 items-center font-mono text-xl font-semibold tabular-nums leading-none text-foreground">{{ formattedDuration || '--' }}</span>
-          </div>
-          <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Masuk</span>
-            <span class="mt-1 flex h-9 items-center font-mono text-xl font-semibold tabular-nums leading-none text-foreground">{{ formattedEntryTime || '--' }}</span>
-          </div>
-          <div class="flex flex-col">
-            <span class="h-4 text-[11px] font-medium tracking-wider text-muted-foreground leading-none">Jenis</span>
-            <div v-if="isMixedLane" class="mt-1 h-9">
-              <select
-                :value="activeVehicleTypeId || ''"
-                class="h-9 min-w-[96px] rounded-md border border-border bg-surface px-2 text-base font-medium text-foreground focus:border-[color:var(--focus-ring)] focus:outline-none"
-                @change="$emit('update:vehicle-type-id', $event.target.value ? Number($event.target.value) : null)"
-              >
-                <option value="">?</option>
-                <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }}</option>
-              </select>
-            </div>
-            <span v-else class="mt-1 flex h-9 items-center text-xl font-semibold leading-none text-foreground">{{ vehicleTypeName || '--' }}</span>
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div class="flex flex-col gap-1.5">
+        <div v-if="showPlate" class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">[-] NO. PLAT</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white font-mono text-base font-semibold tracking-wide text-neutral-900">
+            {{ transaction.plate_number || fallbackPlate || '—' }}
           </div>
         </div>
 
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">[+] NO. TIKET / KARTU</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white font-mono text-base font-semibold tracking-wide text-neutral-900">
+            {{ transaction.barcode || transaction.card_number || '—' }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">[*] JENIS KENDARAAN</label>
+          <select
+            v-if="!isMixedLane && laneVehicleTypeOptions.length > 1"
+            :value="activeVehicleTypeId || ''"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm font-semibold text-neutral-900 focus:border-primary focus:outline-none"
+            @change="$emit('update:vehicle-type-id', Number($event.target.value))"
+          >
+            <option v-for="o in laneVehicleTypeOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
+          </select>
+          <select
+            v-else-if="isMixedLane"
+            :value="activeVehicleTypeId || ''"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm font-semibold text-neutral-900 focus:border-primary focus:outline-none"
+            @change="$emit('update:vehicle-type-id', $event.target.value ? Number($event.target.value) : null)"
+          >
+            <option value="">Pilih jenis…</option>
+            <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }}</option>
+          </select>
+          <div v-else class="flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white font-semibold text-neutral-900">
+            {{ vehicleTypeName || '—' }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">JAM MASUK</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white font-mono text-base font-semibold tabular-nums text-neutral-900">
+            {{ formattedEntryTime || '—' }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">JAM KELUAR</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-neutral-300 bg-white font-mono text-base font-semibold tabular-nums text-neutral-900">
+            {{ formattedExitTime || '—' }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">DURASI PARKIR</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-border bg-surface font-mono text-base font-semibold tabular-nums text-foreground">
+            {{ formattedDuration || '—' }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
+          <label class="text-sm font-semibold tracking-wide text-foreground">TARIF</label>
+          <div class="flex h-10 items-center justify-center rounded-md border border-primary/40 bg-primary/15 font-mono text-lg font-semibold tabular-nums text-foreground">
+            {{ formattedTariff }}
+          </div>
+        </div>
       </div>
 
-      <!-- Center: Plate + tariff stage -->
-      <div class="flex flex-1 min-h-0 flex-col items-center justify-center gap-6">
-        <div class="flex flex-col items-center w-full">
-          <span class="self-start ml-[10%] text-xs font-medium tracking-wider text-muted-foreground">Plat Nomor</span>
-          <div class="mt-2 border-b border-border px-8 pb-2 font-mono text-[6rem] font-semibold leading-none tracking-tight text-foreground">
-            {{ transaction.plate_number }}
-          </div>
-        </div>
-
-        <!-- Tariff highlighted chip -->
-        <div class="inline-flex items-center rounded-lg border border-primary/40 bg-primary/15 px-10 py-3">
-          <span class="font-mono text-4xl font-semibold tabular-nums text-foreground">
-            {{ formattedTariff }}
-          </span>
-        </div>
-
-        <!-- Payment method choice: operator asks driver cash or e-money -->
-        <div v-if="showPaymentChoice" class="grid w-full max-w-md grid-cols-2 gap-4">
-          <PaymentButton
-            icon="cash"
-            label="Tunai"
-            shortcut="F1"
-            :disabled="!canPayCash"
-            :processing="isProcessing"
-            @click="$emit('pay-cash')"
-          />
-          <PaymentButton
-            icon="emoney"
-            label="E-Money"
-            shortcut="F2"
-            :disabled="!canPayEmoney"
-            :processing="isProcessing"
-            @click="$emit('pay-emoney')"
-          />
-        </div>
-
-        <!-- E-money inline status (when active) -->
-        <EmoneyInlineStatus
-          v-if="showEmoneyStatus"
-          class="w-full max-w-md"
-          :emoney-state="emoneyState"
-          :card-info="cardInfo"
-          :balance="balance"
-          :has-card-number="!!transaction?.card_number"
-          @retry="$emit('retry-emoney')"
-          @cancel="$emit('cancel-emoney')"
+      <!-- Payment method choice: operator asks driver cash or e-money -->
+      <div
+        v-if="showPaymentChoice"
+        :class="['mt-4 grid w-full gap-3', emoneyEnabled ? 'grid-cols-2' : 'grid-cols-1']"
+      >
+        <PaymentButton
+          icon="cash"
+          :label="emoneyEnabled ? 'Tunai' : 'Terima & Buka Palang'"
+          :shortcut="emoneyEnabled ? 'F1' : 'Enter'"
+          :disabled="!canPayCash"
+          :processing="isProcessing"
+          @click="$emit('pay-cash')"
+        />
+        <PaymentButton
+          v-if="emoneyEnabled"
+          icon="emoney"
+          label="E-Money"
+          shortcut="F2"
+          :disabled="!canPayEmoney"
+          :processing="isProcessing"
+          @click="$emit('pay-emoney')"
         />
       </div>
 
-      <!-- Bottom: Timeout progress -->
-      <div v-if="showTimeout" class="flex-shrink-0 space-y-1.5">
+      <!-- E-money inline status (when active) -->
+      <EmoneyInlineStatus
+        v-if="showEmoneyStatus && emoneyEnabled"
+        class="mt-3 w-full"
+        :emoney-state="emoneyState"
+        :card-info="cardInfo"
+        :balance="balance"
+        :has-card-number="!!transaction?.card_number"
+        @retry="$emit('retry-emoney')"
+        @cancel="$emit('cancel-emoney')"
+      />
+
+      <!-- Timeout progress -->
+      <div v-if="showTimeout" class="mt-3 flex-shrink-0 space-y-1.5">
         <div class="flex items-center justify-between text-xs">
           <span class="text-xs font-medium tracking-wider text-muted-foreground">Timeout</span>
           <span :class="timeoutTextColor" class="font-mono text-xs font-semibold tabular-nums">
@@ -107,30 +140,38 @@
           />
         </div>
       </div>
+
     </div>
 
-    <!-- Right rail (matches idle aside structure for stable transition) -->
-    <aside class="flex w-96 flex-shrink-0 flex-col gap-3 min-h-0">
-      <section>
-        <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground">
+    <!-- Right rail: maximised CCTV + entry snapshot -->
+    <aside class="flex min-h-0 w-full min-w-[340px] max-w-[620px] flex-shrink-0 basis-[42%] flex-col gap-2">
+      <section class="flex min-h-0 flex-1 flex-col">
+        <div class="mb-1 flex items-center justify-between text-xs font-medium text-muted-foreground">
           <span>Live Exit</span>
           <span v-if="liveExitCameras[0]?.label" class="text-muted-foreground">{{ liveExitCameras[0].label }}</span>
         </div>
-        <CameraColumn :cameras="liveExitCameras" :placeholder-count="1" />
-      </section>
-      <section>
-        <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground">
-          <span>Snapshot Masuk</span>
-          <span v-if="entryCameras[0]?.label" class="text-muted-foreground">{{ entryCameras[0].label }}</span>
+        <div class="min-h-0 flex-1">
+          <CameraColumn :cameras="liveExitCameras" :placeholder-count="1" fill />
         </div>
-        <CameraColumn :cameras="entryCameras" :placeholder-count="1" />
+      </section>
+      <section class="flex min-h-0 flex-1 flex-col">
+        <div class="mb-1 flex items-center justify-between text-xs font-medium text-muted-foreground">
+          <span>Snapshot Masuk</span>
+          <span v-if="entryCameras[0]?.label && !entrySnapshotUrl" class="text-muted-foreground">{{ entryCameras[0].label }}</span>
+        </div>
+        <div v-if="entrySnapshotUrl" class="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/40 bg-black">
+          <img :src="entrySnapshotUrl" alt="snapshot masuk" class="h-full w-full object-cover" >
+        </div>
+        <div v-else class="min-h-0 flex-1">
+          <CameraColumn :cameras="entryCameras" :placeholder-count="1" fill />
+        </div>
       </section>
     </aside>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useFormatters } from '~/composables/useFormatters'
 import EmoneyInlineStatus from './EmoneyInlineStatus.vue'
 import CameraColumn from './CameraColumn.vue'
@@ -145,6 +186,7 @@ const props = defineProps({
   paymentState: { type: String, default: 'IDLE' },
   emoneyState: { type: String, default: 'IDLE' },
   vehicleTypes: { type: Array, default: () => [] },
+  laneVehicleTypeOptions: { type: Array, default: () => [] },
   timeoutSeconds: { type: Number, default: 120 },
   canPayCash: { type: Boolean, default: false },
   canPayEmoney: { type: Boolean, default: false },
@@ -153,12 +195,18 @@ const props = defineProps({
   awaitingGateOpen: { type: Boolean, default: false },
   isProcessing: { type: Boolean, default: false },
   isMixedLane: { type: Boolean, default: false },
+  entrySnapshotUrl: { type: String, default: null },
+  emoneyEnabled: { type: Boolean, default: true },
   activeVehicleTypeId: { type: Number, default: null },
   activeTariff: { type: Number, default: null },
   shiftName: { type: String, default: '' },
   transactionCount: { type: Number, default: 0 },
   cashCollected: { type: Number, default: 0 },
   lastEntry: { type: Object, default: null },
+  showPlate: { type: Boolean, default: true },
+  platePrefix: { type: String, default: '' },
+  laneVehicleTypeName: { type: String, default: '' },
+  fallbackPlate: { type: String, default: '' },
 })
 
 defineEmits([
@@ -168,11 +216,21 @@ defineEmits([
   'cancel-emoney',
   'update:vehicle-type-id',
   'barcode-lookup',
+  'plate-lookup',
+  'manual-open',
+  'reprint-receipt',
+  'gate-open',
 ])
 
 const { formatCurrency, formatDuration, formatTime } = useFormatters()
 
 const hasTransaction = computed(() => props.transaction !== null)
+
+const resolvedLaneVehicleTypeName = computed(() => {
+  const id = props.activeVehicleTypeId || props.transaction?.vehicle_type_id
+  if (!id) return props.laneVehicleTypeName || ''
+  return props.vehicleTypes.find((t) => t.id === id)?.name || props.laneVehicleTypeName || ''
+})
 
 const liveExitCameras = computed(() => {
   const exit = props.cameras.filter((c) => /exit|out|keluar/i.test(c.label || ''))
@@ -199,6 +257,23 @@ const formattedDuration = computed(() => {
 const formattedEntryTime = computed(() => {
   if (!hasTransaction.value) return null
   return formatTime(props.transaction?.entry_time)
+})
+
+// Exit time is "now" until the transaction is completed.
+const now = ref(new Date())
+let clockTimer = null
+onMounted(() => {
+  clockTimer = setInterval(() => { now.value = new Date() }, 1000)
+})
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
+
+const formattedExitTime = computed(() => {
+  if (!hasTransaction.value) return null
+  if (props.transaction?.exit_time) return formatTime(props.transaction.exit_time)
+  const d = now.value
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 })
 
 const vehicleTypeName = computed(() => {

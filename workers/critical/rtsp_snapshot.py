@@ -12,7 +12,7 @@ from shared.logging import get_logger
 
 logger = get_logger("rtsp_snapshot")
 
-FFMPEG_TIMEOUT = 8.0  # seconds
+FFMPEG_TIMEOUT = 15.0  # seconds — 1080p HEVC cameras need >8s to emit a keyframe
 
 
 async def capture_rtsp_frame_to_bytes(

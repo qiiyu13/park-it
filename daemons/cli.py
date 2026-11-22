@@ -27,7 +27,7 @@ from shared.logging import configure_logging, get_logger
 logger = get_logger("daemon_cli")
 
 
-async def _build_config(session: AsyncSession, gate_code: str) -> dict:
+async def _build_config(session: AsyncSession, gate_code: str, *, quiet: bool = False) -> dict:
     """Fetch gate config from DB and flatten into dict for daemon consumption."""
     # Import here to avoid circulars and ensure models are registered
     from api.app.models.gate import Gate
@@ -73,14 +73,96 @@ async def _build_config(session: AsyncSession, gate_code: str) -> dict:
     config["close_command"] = hw.get("close_command")
     config["pulse_duration_ms"] = hw.get("pulse_duration_ms")
 
-    logger.info(
-        "gate_config_loaded",
-        gate_id=gate_code,
-        direction=gate.direction,
-        protocol=gate.protocol,
-        host=gate.controller_host,
-        port=gate.controller_port,
+    # Lane reset timer: per-gate hardware_config override wins, else the global
+    # setting, else 5s. Clears the IN3 loop latch without waiting for IN3OFF.
+    lane_reset = hw.get("lane_reset_seconds")
+    if lane_reset is None:
+        from api.app.models.setting import Setting
+
+        setting_row = (
+            await session.execute(
+                select(Setting).where(Setting.key == "lane_reset_seconds")
+            )
+        ).scalar_one_or_none()
+        lane_reset = setting_row.value if setting_row is not None else None
+    try:
+        config["lane_reset_seconds"] = max(1, int(lane_reset))
+    except (TypeError, ValueError):
+        config["lane_reset_seconds"] = 5
+
+    # Lane reset trigger: timer / IN3OFF / both (per-gate override first).
+    lane_mode = hw.get("lane_reset_mode")
+    if lane_mode is None:
+        from api.app.models.setting import Setting
+
+        mode_row = (
+            await session.execute(
+                select(Setting).where(Setting.key == "lane_reset_mode")
+            )
+        ).scalar_one_or_none()
+        lane_mode = mode_row.value if mode_row is not None else None
+    lane_mode = str(lane_mode or "time").strip().lower()
+    config["lane_reset_mode"] = lane_mode if lane_mode in ("time", "in3off", "both") else "time"
+
+    if not quiet:
+        logger.info(
+            "gate_config_loaded",
+            gate_id=gate_code,
+            direction=gate.direction,
+            protocol=gate.protocol,
+            host=gate.controller_host,
+            port=gate.controller_port,
+        )
+
+    # Active ticket printer for this gate. The in-flow cash print must use the
+    # same transport the print worker uses: NETWORK/SERIAL printers are printed
+    # by the worker (the daemon only enqueues), CONTROLLER_PASSTHROUGH must be
+    # printed by the daemon because it already owns the single TCP socket.
+    from api.app.models.printer import Printer
+
+    printer_result = await session.execute(
+        select(Printer).where(
+            Printer.gate_id == gate_code,
+            Printer.gate_type == "IN",
+            Printer.is_active == True,  # noqa: E712
+        )
     )
+    printer = printer_result.scalar_one_or_none()
+
+    # Shared printer referenced from the gate form wins over gate-bound rows.
+    pid = (gate.hardware_config or {}).get("printer_id") if gate else None
+    if pid:
+        try:
+            from api.app.models.printer import Printer as _Printer
+
+            shared = await session.get(_Printer, int(pid))
+            if shared is not None:
+                printer = shared
+        except (TypeError, ValueError):
+            pass
+
+    config["printer"] = (
+        {
+            "mode": printer.mode,
+            "ip_address": printer.ip_address,
+            "port": printer.port,
+            "serial_device": printer.serial_device,
+            "baudrate": printer.baudrate,
+        }
+        if printer is not None
+        else None
+    )
+
+    # Site name for the printed ticket header/footer.
+    try:
+        from api.app.models.site_config import SiteConfig
+
+        site_result = await session.execute(select(SiteConfig).limit(1))
+        site_cfg = site_result.scalar_one_or_none()
+        config["site_name"] = (site_cfg.name if site_cfg and site_cfg.name else "") or ""
+    except Exception:
+        config["site_name"] = ""
+
     return config
 
 
@@ -106,13 +188,21 @@ async def _run_daemon(gate_code: str) -> None:
         config = await _build_config(session, gate_code)
         direction = config["direction"]
 
-    await engine.dispose()
+    async def load_config() -> dict | None:
+        """Re-read the gate row for live reloads (no restart needed)."""
+        try:
+            async with session_factory() as session:
+                return await _build_config(session, gate_code, quiet=True)
+        except RuntimeError:
+            return None
 
     # Instantiate correct daemon based on direction
     if direction == "IN":
         from daemons.gate_in import GateInDaemon
 
-        daemon = GateInDaemon(gate_id=gate_code, config=config)
+        daemon = GateInDaemon(
+            gate_id=gate_code, config=config, config_loader=load_config
+        )
     elif direction == "OUT":
         # booth_bridge owns serial relay + RFID/e-money readers on the booth PC.
         # No daemon runs for OUT gates.
@@ -122,7 +212,10 @@ async def _run_daemon(gate_code: str) -> None:
         raise RuntimeError(f"Unknown gate direction: {direction}")
 
     # Daemon handles its own signal handling, task cancellation, Redis close
-    await daemon.run()
+    try:
+        await daemon.run()
+    finally:
+        await engine.dispose()
     logger.info("daemon_shutdown_complete", gate_id=gate_code)
 
 

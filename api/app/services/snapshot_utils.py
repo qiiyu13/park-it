@@ -8,6 +8,49 @@ from shared.logging import get_logger
 logger = get_logger("snapshot_utils")
 
 
+async def resolve_gate_cameras(db: AsyncSession, gate) -> list[dict]:
+    """Camera configs for a gate: inline ``cameras[]`` + referenced records.
+
+    Cameras are shared devices: a gate may reference rows from the cameras
+    table via ``hardware_config.camera_ids`` so one physical camera can serve
+    several gates/booths. Inline entries (legacy) still win by label.
+    """
+    cams = gate.get_cameras()
+
+    ids = gate.camera_ids if hasattr(gate, "camera_ids") else []
+    if ids:
+        from api.app.models import Camera
+
+        rows = (
+            await db.execute(select(Camera).where(Camera.id.in_(ids), Camera.is_active == True))  # noqa: E712
+        ).scalars().all()
+        by_id = {c.id: c for c in rows}
+        seen = {(c.get("label") or "") for c in cams}
+        for cam_id in ids:
+            cam = by_id.get(cam_id)
+            if cam is None:
+                continue
+            label = cam.name
+            if label in seen:
+                continue
+            url = cam.rtsp_url or cam.snapshot_url
+            if not url:
+                continue
+            cams.append(
+                {
+                    "url": url,
+                    "preview_url": f"/api/cameras/{cam.id}/stream",
+                    "snapshot_preview_url": f"/api/cameras/{cam.id}/snapshot",
+                    "label": label,
+                    "username": cam.username,
+                    "password": cam.password,
+                    "auth_type": cam.auth_type or "none",
+                }
+            )
+            seen.add(label)
+    return cams
+
+
 async def enqueue_snapshots_for_gate(
     db: AsyncSession,
     gate_code: str,
@@ -31,7 +74,7 @@ async def enqueue_snapshots_for_gate(
         if gate is None:
             return
 
-        cameras = gate.get_cameras()
+        cameras = await resolve_gate_cameras(db, gate)
         if not cameras:
             return
 

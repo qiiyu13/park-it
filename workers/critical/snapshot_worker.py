@@ -100,8 +100,8 @@ async def take_snapshot(
         camera_label=camera_label,
     )
 
-    if snapshot_id and snapshot_type == "exit":
-        await _broadcast_exit_snapshot(gate_id, snapshot_id)
+    if snapshot_id:
+        await _broadcast_snapshot(gate_id, snapshot_id, snapshot_type)
 
     from api.app.middleware.metrics import snapshot_jobs_total
     snapshot_jobs_total.labels(snapshot_type=snapshot_type, result="success").inc()
@@ -169,21 +169,21 @@ async def _save_snapshot_record(
         return None
 
 
-async def _broadcast_exit_snapshot(gate_id: str, snapshot_id: int) -> None:
-    """Publish camera_snapshot to Redis so broadcaster pushes it to POS WebSocket."""
+async def _broadcast_snapshot(gate_id: str, snapshot_id: int, snapshot_type: str) -> None:
+    """Publish camera_snapshot so the POS can show entry/exit frames live."""
     try:
         from shared.redis import redis_client
 
         await redis_client.connect()
         payload = json.dumps({
             "type": "camera_snapshot",
-            "snapshot_type": "exit",
+            "snapshot_type": snapshot_type,
             "snapshot_url": f"/api/snapshots/{snapshot_id}/image",
         })
         await redis_client.client.publish(f"parking.events.{gate_id}", payload)
-        logger.info("exit_snapshot_broadcast", gate_id=gate_id, snapshot_id=snapshot_id)
+        logger.info(f"{snapshot_type}_snapshot_broadcast", gate_id=gate_id, snapshot_id=snapshot_id)
     except Exception as e:
-        logger.error("exit_snapshot_broadcast_failed", error=str(e), gate_id=gate_id)
+        logger.error("snapshot_broadcast_failed", error=str(e), gate_id=gate_id)
 
 
 async def _download_http(

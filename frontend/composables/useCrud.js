@@ -25,7 +25,12 @@ export const useCrud = (resourcePath, opts = {}) => {
   const label = opts.label || 'Data'
 
   function _errorMessage(err) {
-    return err?.data?.detail || err?.message || 'Terjadi kesalahan tidak terduga'
+    const detail = err?.data?.detail
+    if (Array.isArray(detail)) {
+      // Pydantic validation errors — without this the toast shows "[object Object]".
+      return detail.map((d) => d?.msg || JSON.stringify(d)).join('; ')
+    }
+    return detail || err?.message || 'Terjadi kesalahan tidak terduga'
   }
 
   async function list(params = {}, { silent = true } = {}) {

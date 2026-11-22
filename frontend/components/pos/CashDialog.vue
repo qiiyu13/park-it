@@ -54,7 +54,7 @@
         <div class="flex items-center justify-between">
           <div class="text-xs font-medium text-muted-foreground max-w-md">
             <div>Konfirmasi 1/7 — bisa juga ketik angka langsung.</div>
-            <div class="mt-1">setelah Enter, struk dicetak otomatis, layar pindah ke 'buka palang', tekan Space saat kembalian sudah diberikan.</div>
+            <div class="mt-1">setelah Enter, struk dicetak dan palang terbuka otomatis.</div>
           </div>
           <div class="flex gap-2">
             <button class="pos-btn" @click="close">

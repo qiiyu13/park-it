@@ -11,6 +11,12 @@ WorkingDirectory=/opt/parking-system-v2/frontend
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=3000
+# Empty = same-origin: the browser calls /api and wss://<this host>/ws through
+# nginx. Without these the Nuxt runtime config falls back to localhost:8000,
+# which the operator's browser cannot reach (NetworkError on login, especially
+# over HTTPS).
+Environment=NUXT_PUBLIC_API_BASE_URL=
+Environment=NUXT_PUBLIC_WS_BASE_URL=
 ExecStart=/usr/bin/node /opt/parking-system-v2/frontend/.output/server/index.mjs
 Restart=always
 RestartSec=5

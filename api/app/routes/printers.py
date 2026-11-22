@@ -1,9 +1,10 @@
 """Printer management routes — CRUD + paper counter operations."""
 
+import asyncio
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,13 @@ class PrinterCreateRequest(BaseModel):
     baudrate: int = 9600
     paper_capacity: int = 300
 
+    @field_validator("port", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
 
 class PrinterUpdateRequest(BaseModel):
     name: str | None = None
@@ -42,6 +50,14 @@ class PrinterUpdateRequest(BaseModel):
     baudrate: int | None = None
     paper_capacity: int | None = None
     is_active: bool | None = None
+
+    @field_validator("port", "baudrate", "paper_capacity", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v):
+        """The UI's number inputs submit "" when cleared — treat as unset."""
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class PaperRefillRequest(BaseModel):
@@ -266,6 +282,91 @@ async def decrement_paper(
         )
 
     return _to_response(printer)
+
+
+@router.post("/{printer_id}/test")
+async def test_printer(
+    printer_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth),
+) -> dict:
+    """Print a small test ticket through whichever transport answers.
+
+    AUTO (and CONTROLLER_PASSTHROUGH) probe network → serial → controller in
+    that order, so a technician can verify a freshly wired printer without
+    touching the gate config.
+    """
+    printer = await db.get(Printer, printer_id)
+    if printer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Printer not found")
+
+    from workers.critical import print_worker as pw
+
+    escpos = b"".join([
+        b"\x1b\x61\x01",
+        b"TEST PRINT\n",
+        b"\x1b\x61\x00",
+        f"Printer : {printer.name}\n".encode(),
+        f"Gate    : {printer.gate_id}\n".encode(),
+        b"E-Parking v2\n",
+        b"\n\n\n\x1d\x56\x41",
+    ])
+
+    mode = (printer.mode or "AUTO").upper()
+    if mode in ("AUTO", "CONTROLLER_PASSTHROUGH"):
+        if pw._probe_network_printer(printer.ip_address, printer.port):
+            mode = "NETWORK"
+        elif pw._probe_serial_device(printer.serial_device):
+            mode = "SERIAL"
+        elif pw._probe_usb_printer(printer.serial_device):
+            mode = "USB"
+        else:
+            mode = "CONTROLLER_PASSTHROUGH"
+
+    config: dict = {}
+    if mode == "NETWORK":
+        if not printer.ip_address:
+            raise HTTPException(status_code=400, detail="Printer has no IP address configured")
+        config = {"printer_ip_address": printer.ip_address, "printer_port": printer.port or 9100}
+    elif mode == "SERIAL":
+        if not printer.serial_device:
+            raise HTTPException(status_code=400, detail="Printer has no serial device configured")
+        config = {"printer_device": printer.serial_device, "baudrate": printer.baudrate}
+    elif mode == "USB":
+        if not printer.serial_device:
+            raise HTTPException(status_code=400, detail="Printer has no USB device path configured (/dev/usb/lp0)")
+        config = {"printer_device": printer.serial_device}
+    else:
+        gate = (await db.execute(select(Gate).where(Gate.code == printer.gate_id))).scalar_one_or_none()
+        if gate is None or not gate.controller_host:
+            raise HTTPException(
+                status_code=400,
+                detail="Printer is not reachable by network/serial and its gate has no controller",
+            )
+        config = {
+            "protocol": gate.protocol,
+            "controller_host": gate.controller_host,
+            "controller_port": gate.controller_port,
+        }
+
+    def _run() -> None:
+        if mode == "NETWORK":
+            pw._print_via_network(escpos, config)
+        elif mode == "SERIAL":
+            pw._print_via_serial(escpos, config)
+        elif mode == "USB":
+            pw._print_via_usb(escpos, config)
+        else:
+            pw._print_via_controller(escpos, config)
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as exc:
+        logger.warning("printer_test_failed", printer_id=printer_id, mode=mode, error=str(exc))
+        raise HTTPException(status_code=502, detail=f"{mode} print failed: {exc}"[:300])
+
+    logger.info("printer_test_ok", printer_id=printer_id, mode=mode)
+    return {"success": True, "mode": mode, "detail": f"Test print sent via {mode}"}
 
 
 @router.get("/status/summary")

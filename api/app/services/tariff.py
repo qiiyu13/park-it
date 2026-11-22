@@ -9,10 +9,12 @@ Pricing model (per vehicle type):
 * ``grace_period_minutes`` — stays at or under this are free.
 * ``base_tariff`` — flat charge for the first hour ("jam pertama").
 * ``hourly_rate`` — charge for each *subsequent* started hour.
-* ``is_progressive`` — when ``True`` the first hour is ``base_tariff`` and every
-  hour after that is ``hourly_rate`` (progressive model). When ``False`` the fee
-  is a flat ``hourly_rate`` per started hour (``base_tariff`` is used only as a
-  fallback when ``hourly_rate`` is 0).
+* ``tariff_mode`` — ``"flat"``: one fixed fee per visit (``base_tariff``, or
+  ``hourly_rate`` if that is 0). ``"hourly"``: ``hourly_rate`` per started hour
+  (``base_tariff`` is the fallback when ``hourly_rate`` is 0). ``"progressive"``:
+  first hour ``base_tariff``, every hour after that ``hourly_rate``.
+* ``grace_period_minutes`` on a rate overrides the config default (0 = no free
+  period).
 * ``overnight_mode`` / ``overnight_tariff`` — ``"midnight"`` adds the surcharge
   once per calendar-date boundary crossed; ``"24h"`` adds it once per full 24h
   block; ``"none"`` disables it.
@@ -24,8 +26,7 @@ Example configuration (stored in Setting model or config file):
     {
         "vehicle_types": {
             "MOTOR": {"hourly_rate": 2000, "daily_cap": 15000},
-            "MOBIL": {"hourly_rate": 5000, "daily_cap": 50000},
-            "BUS":   {"hourly_rate": 10000, "daily_cap": 100000}
+            "MOBIL": {"hourly_rate": 5000, "daily_cap": 50000}
         },
         "grace_period_minutes": 15
     }
@@ -49,7 +50,8 @@ class VehicleTypeRate:
     overnight_mode: str = "none"  # "midnight" | "24h" | "none"
     overnight_tariff: int = 0  # Surcharge per night
     lost_ticket_penalty: int = 0  # Minimum fee floor when ticket is lost
-    is_progressive: bool = False  # base_tariff first hour + hourly_rate after
+    tariff_mode: str = "hourly"  # "flat" | "hourly" | "progressive"
+    grace_period_minutes: int | None = None  # None = use TariffConfig default
 
 
 @dataclass
@@ -93,14 +95,21 @@ def calculate_tariff(
     duration_minutes = (exit_time - entry_time).total_seconds() / 60
 
     # Grace period: no charge (does not apply to lost tickets).
-    if not is_lost_ticket and duration_minutes <= config.grace_period_minutes:
+    grace = (
+        rate.grace_period_minutes
+        if rate.grace_period_minutes is not None
+        else config.grace_period_minutes
+    )
+    if not is_lost_ticket and duration_minutes <= grace:
         return 0
 
     # Round up to whole started hours (minimum 1 once past grace).
     hours = max(1, ceil(duration_minutes / MINUTES_PER_HOUR))
 
     # Base time fee.
-    if rate.is_progressive:
+    if rate.tariff_mode == "flat":
+        fee = rate.base_tariff or rate.hourly_rate
+    elif rate.tariff_mode == "progressive":
         first_hour = rate.base_tariff or rate.hourly_rate
         fee = first_hour + max(0, hours - 1) * rate.hourly_rate
     else:
@@ -133,7 +142,6 @@ DEFAULT_TARIFF_CONFIG = TariffConfig(
     vehicle_types={
         "MOTOR": VehicleTypeRate(hourly_rate=2000, daily_cap=15000),
         "MOBIL": VehicleTypeRate(hourly_rate=5000, daily_cap=50000),
-        "BUS": VehicleTypeRate(hourly_rate=10000, daily_cap=100000),
     },
     grace_period_minutes=15,
 )

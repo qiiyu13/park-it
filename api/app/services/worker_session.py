@@ -30,15 +30,15 @@ async def _get_worker_and_verify_pin(db: AsyncSession, worker_id: int, pin: str)
     """Fetch worker and verify PIN. Raises 401 on mismatch, 404 if not found."""
     worker = await db.get(User, worker_id)
     if worker is None or not worker.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Worker not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Petugas tidak ditemukan atau nonaktif — periksa menu Personil")
     if not worker.worker_pin:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Worker has no PIN set — contact admin",
+            detail="Petugas ini belum punya PIN — buka Personil, set PIN 4 digit",
         )
     if not verify_password(pin, worker.worker_pin):
         logger.warning("worker_pin_mismatch", worker_id=worker_id)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid PIN")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="PIN salah — coba lagi atau minta admin reset PIN di menu Personil")
     return worker
 
 
@@ -85,12 +85,12 @@ async def check_in(
     if existing is not None and existing.status == "ACTIVE":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Gate already has an active worker session",
+            detail="Gate ini sudah ada petugas aktif — gunakan serah terima (handover) di badge petugas",
         )
     if existing is not None and existing.status == "PENDING_HANDOVER":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Use confirm-incoming endpoint to complete pending handover",
+            detail="Ada serah terima tertunda di gate ini — selesaikan konfirmasi petugas baru",
         )
 
     # Determine shift
@@ -99,14 +99,14 @@ async def check_in(
         assignment = await db.get(ShiftAssignment, shift_assignment_id)
         if assignment is None or assignment.gate_id != gate_id:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid shift assignment"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Penugasan tidak cocok dengan gate ini — pilih penugasan hari ini untuk gate yang sama (Jadwal Shift → Penugasan)"
             )
         shift_id = assignment.shift_id
     else:
         active_shift = await get_current_shift(db)
         if active_shift is None:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="No active shift for current time"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Belum ada shift aktif untuk jam sekarang — buat master Shift dulu di Jadwal Shift → tab Shift, atau buat penugasan hari ini"
             )
         shift_id = active_shift.id
 

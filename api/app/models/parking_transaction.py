@@ -106,14 +106,14 @@ class ParkingTransaction(Base, IntPKMixin, TimestampMixin):
     shift: Mapped["Shift | None"] = relationship("Shift", lazy="noload")
     operator: Mapped["User | None"] = relationship("User", lazy="noload")
 
-    # Partial unique indexes: prevent duplicate *active* card / barcode while
-    # still allowing the same physical card or ticket to be reused across
-    # separate (completed) stays.
+    # Partial indexes on *active* rows. The ticket barcode stays unique (one
+    # physical ticket = one stay), while the member card is only indexed:
+    # anti-passback / vehicle quota is enforced in the RFID entry handler so
+    # sites can allow several vehicles per card.
     __table_args__ = (
         Index(
-            "uq_active_card",
+            "ix_active_card",
             "card_number",
-            unique=True,
             postgresql_where=(status == "ACTIVE") & (card_number.isnot(None)),
         ),
         Index(

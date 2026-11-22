@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import get_current_user
 from api.app.models.gate import Gate
+from api.app.models.pos import Pos
 from api.app.models.setup_session import SetupSession
 from api.app.models.user import User
 from api.app.schemas.common import SuccessResponse
@@ -453,9 +455,31 @@ async def detect_serial(
 @router.post("/test-device", response_model=TestDeviceResponse)
 async def test_device(
     body: TestDeviceRequest,
+    db: AsyncSession = Depends(get_db),
     auth=Depends(require_setup_or_admin),
 ) -> TestDeviceResponse:
     """Probe serial port / TCP endpoint / ping target — returns latency or error."""
+    # Booth-driven serial lanes: the relay is attached to the cashier PC, so a
+    # local probe on the server can only ever fail. Report booth liveness.
+    if body.type == "serial" and body.gate_id is not None:
+        gate = await db.get(Gate, body.gate_id)
+        if gate is not None and gate.pos_id is not None:
+            pos = await db.get(Pos, gate.pos_id)
+            seen = pos.last_seen_at if pos else None
+            status = (pos.last_status or {}) if pos else {}
+            if seen is not None and seen.tzinfo is None:
+                seen = seen.replace(tzinfo=UTC)
+            fresh = seen is not None and (datetime.now(UTC) - seen) < timedelta(seconds=90)
+            if fresh and status.get("gate_connected"):
+                return TestDeviceResponse(
+                    ok=True,
+                    detail=f"terhubung via booth {pos.code} ({seen.isoformat()})",
+                )
+            return TestDeviceResponse(
+                ok=False,
+                error=f"booth {pos.code if pos else '?'} tidak terhubung / relay tidak terdeteksi",
+            )
+
     py = sys.executable or "python3"
     script = _script_path("test_device.py")
     args: list[str] = [py, script, body.type]
@@ -491,7 +515,39 @@ async def test_device(
             ok=False,
             error=stderr.decode("utf-8", errors="ignore").strip() or "probe returned non-JSON",
         )
+
+    # PCLess/Compass controllers accept a single TCP client, so the raw probe is
+    # refused whenever the gate daemon already owns the socket. A fresh daemon
+    # heartbeat proves the lane is connected — report that instead of a scary
+    # "connection refused".
+    if body.type == "tcp" and not payload.get("ok") and body.host and body.port:
+        live = await _gate_heartbeat_for_endpoint(db, body.host, body.port)
+        if live is not None:
+            return TestDeviceResponse(
+                ok=True,
+                latency_ms=None,
+                detail=f"connected — {live} is holding the socket (single-client controller)",
+            )
     return TestDeviceResponse(**payload)
+
+
+async def _gate_heartbeat_for_endpoint(
+    db: AsyncSession, host: str, port: int
+) -> str | None:
+    """Return the gate code whose daemon heartbeat is live for this endpoint."""
+    result = await db.execute(
+        select(Gate).where(Gate.controller_host == host, Gate.controller_port == port)
+    )
+    gates = list(result.scalars().all())
+    if not gates:
+        return None
+    with contextlib.suppress(Exception):
+        await redis_client.connect()
+        for gate in gates:
+            ttl = await redis_client.client.ttl(f"gate:heartbeat:{gate.code}")
+            if ttl and ttl > 0:
+                return gate.code
+    return None
 
 
 def _confirm_compass(host: str, port: int, timeout: float = 0.5) -> bool:

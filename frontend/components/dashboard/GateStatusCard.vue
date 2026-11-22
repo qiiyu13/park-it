@@ -31,6 +31,15 @@
         {{ testing ? 'Menguji…' : 'Test' }}
       </Button>
       <Button variant="outline" size="sm" @click="$emit('edit')">Edit</Button>
+      <Button variant="outline" size="sm" @click="$emit('logs')">Log</Button>
+      <Button
+        v-if="gate.direction === 'IN' && !online"
+        variant="outline"
+        size="sm"
+        @click="$emit('enable-daemon')"
+      >
+        Aktifkan
+      </Button>
       <Button variant="ghost" size="sm" @click="$emit('open')">Buka Gate</Button>
     </div>
   </article>
@@ -44,9 +53,10 @@ import StatusPill from '~/components/setup/StatusPill.vue'
 const props = defineProps({
   gate: { type: Object, required: true },
   testing: { type: Boolean, default: false },
+  booths: { type: Array, default: () => [] },
 })
 
-defineEmits(['test', 'edit', 'open'])
+defineEmits(['test', 'edit', 'open', 'logs', 'enable-daemon'])
 
 const online = computed(() => !!props.gate.is_online)
 
@@ -65,12 +75,12 @@ const connectionLabel = computed(() => {
 const peripherals = computed(() => {
   const hc = props.gate.hardware_config || {}
   const rows = []
-  if (hc.printer?.enabled) {
+  if (hc.printer?.enabled || hc.printer_id) {
     rows.push({
       key: 'printer',
-      label: 'Pencetak',
-      status: hc.printer.last_ok ? 'online' : 'idle',
-      detail: hc.printer.paper_pct != null ? `kertas ${hc.printer.paper_pct}%` : '',
+      label: 'Printer',
+      status: hc.printer?.last_ok || hc.printer_id ? 'online' : 'idle',
+      detail: hc.printer?.paper_pct != null ? `kertas ${hc.printer.paper_pct}%` : (hc.printer_id ? 'terpasang' : ''),
     })
   }
   if (hc.emoney?.enabled) {
@@ -82,8 +92,45 @@ const peripherals = computed(() => {
     })
   }
   if (hc.rfid?.enabled) rows.push({ key: 'rfid', label: 'RFID', status: 'idle', detail: '' })
-  if (hc.camera?.enabled) rows.push({ key: 'camera', label: 'Kamera', status: hc.camera.url ? 'online' : 'idle', detail: hc.camera.url ? 'RTSP' : 'no url' })
+  const camCount = (hc.cameras && hc.cameras.length) || (hc.camera?.url ? 1 : 0)
+  if (hc.camera?.enabled || camCount) {
+    rows.push({
+      key: 'camera',
+      label: 'Kamera',
+      status: camCount ? 'online' : 'idle',
+      detail: camCount ? `${camCount} kamera` : 'no url',
+    })
+  }
+
+  const barrier = barrierStatus.value
+  rows.push({
+    key: 'barrier',
+    label: 'Gate Barrier',
+    status: barrier.status,
+    detail: barrier.detail,
+  })
   return rows
+})
+
+// Exit barrier lives on the booth relay, not on this server. Show the booth's
+// live relay status so a missing relay is visible without opening Edit Gate.
+const barrierStatus = computed(() => {
+  const gate = props.gate
+  if (gate.direction === 'OUT' && gate.protocol === 'serial') {
+    if (!gate.pos_id) return { status: 'idle', detail: 'belum terpasang' }
+    const booth = props.booths.find((b) => b.id === gate.pos_id)
+    if (!booth) return { status: 'idle', detail: 'booth tidak ditemukan' }
+    const seen = booth.last_seen_at ? new Date(booth.last_seen_at).getTime() : 0
+    const fresh = seen > 0 && Date.now() - seen < 90_000
+    const connected = fresh && !!booth.last_status?.gate_connected
+    return connected
+      ? { status: 'online', detail: `via ${booth.code}` }
+      : { status: 'offline', detail: `booth ${fresh ? 'relay tidak ada' : 'offline'}` }
+  }
+  const ok = gate.controller_ok ?? gate.is_online
+  return ok
+    ? { status: 'online', detail: 'controller' }
+    : { status: 'offline', detail: 'controller' }
 })
 
 const heartbeatLabel = computed(() => {

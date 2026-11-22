@@ -116,7 +116,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if ! grep -q "Ubuntu 24.04" /etc/os-release 2>/dev/null; then
-    warn "This script targets Ubuntu 24.04 LTS (ships python3.12 natively). Continuing anyway..."
+    warn "This script targets Ubuntu 24.04+ (ships python3.12+). Continuing anyway..."
     warn "On 22.04 the python3.12 packages below are NOT in the default repos and install will fail."
     if ! $NON_INTERACTIVE; then
         read -rp "Press Enter to continue or Ctrl+C to abort..."
@@ -213,18 +213,20 @@ apt-get upgrade -y -qq
 step "3/12 — Installing Dependencies"
 
 apt-get install -y -qq \
-    postgresql-16 postgresql-client-16 postgresql-contrib-16 \
+    postgresql postgresql-client postgresql-contrib \
     redis-server \
     nginx \
-    python3.12 python3.12-venv python3.12-dev python3-pip \
+    python3 python3-venv python3-dev python3-pip \
     curl wget git unzip rsync \
     ffmpeg
 
 # Node.js 22 (matches CI and the frontend Docker image)
+# Distro nodejs (24.04: 18/20, 26.04: 22) — NodeSource does not publish for
+# every Ubuntu codename and its stub fails hard on newer releases.
 if ! command -v node &>/dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-    apt-get install -y -qq nodejs
+    apt-get install -y -qq nodejs npm
 fi
+command -v npm &>/dev/null || apt-get install -y -qq npm
 ok "Node.js $(node -v) installed"
 
 # Google Chrome
@@ -259,7 +261,7 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE parking TO parking;"
 ok "PostgreSQL user/database ensured (password matches .env)"
 
 # Allow local connections with md5
-PG_HBA="/etc/postgresql/16/main/pg_hba.conf"
+PG_HBA="$(ls -d /etc/postgresql/*/main 2>/dev/null | head -1)/pg_hba.conf"
 if ! grep -q "parking" "$PG_HBA"; then
     echo "local   parking   parking   md5" >> "$PG_HBA"
     systemctl restart postgresql
@@ -295,6 +297,9 @@ elif [[ -n "${PARKING_SOURCE_DIR:-}" ]]; then
         --exclude=.output --exclude=graphify-out --exclude=__pycache__ \
         "${PARKING_SOURCE_DIR}/" "$PROJECT_ROOT/"
     chown -R parking:parking "$PROJECT_ROOT"
+    # rsync preserves modes but a flash-disk copy can lose the exec bit; the
+    # sudoers entries point at these scripts, so make them runnable.
+    chmod +x "$PROJECT_ROOT"/scripts/*.sh 2>/dev/null || true
 else
     rm -rf "$PROJECT_ROOT"
     git clone "$REPO_URL" "$PROJECT_ROOT"
@@ -305,7 +310,7 @@ cd "$PROJECT_ROOT"
 
 # Create virtual environment
 if [[ ! -d ".venv" ]]; then
-    sudo -u parking python3.12 -m venv .venv
+    sudo -u parking python3 -m venv .venv
 fi
 
 # Install Python dependencies
@@ -353,7 +358,7 @@ REDIS_DB=0
 # Security
 JWT_SECRET=${JWT_SECRET}
 JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=480
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
@@ -484,9 +489,8 @@ cat > /etc/sudoers.d/parking-setup <<EOF
 # Audited by /etc/audit/rules.d if enabled.
 parking ALL=(root) NOPASSWD: ${PROJECT_ROOT}/scripts/detect-serial-devices.sh
 parking ALL=(root) NOPASSWD: ${PROJECT_ROOT}/scripts/enable-gate-daemons.sh
-parking ALL=(root) NOPASSWD: /usr/bin/systemctl start parking-daemon-gate-*
-parking ALL=(root) NOPASSWD: /usr/bin/systemctl enable parking-daemon-gate-*
-parking ALL=(root) NOPASSWD: /usr/bin/systemctl restart parking-daemon-gate-*
+parking ALL=(root) NOPASSWD: ${PROJECT_ROOT}/scripts/gate-logs.sh
+parking ALL=(root) NOPASSWD: ${PROJECT_ROOT}/scripts/gate-daemon-control.sh
 parking ALL=(root) NOPASSWD: /usr/bin/udevadm control --reload-rules
 parking ALL=(root) NOPASSWD: /usr/bin/udevadm trigger *
 parking ALL=(root) NOPASSWD: /usr/bin/udevadm settle *
@@ -584,6 +588,9 @@ ok "Nginx configured and restarted"
 # ── Quick provisioning (v1-style one-command setup) ──────────────────────────
 if $QUICK; then
     step "Quick provisioning — admin, site, tariff, area, gates"
+    # quickstart_provision.py resolves .env relative to CWD; without this it
+    # falls back to default DB credentials and every provisioning run fails.
+    cd "$PROJECT_ROOT"
 
     QUICK_ARGS=(
         --admin-username "$QUICK_ADMIN_USER"

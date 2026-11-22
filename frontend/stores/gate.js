@@ -17,6 +17,7 @@ export const useGateStore = defineStore('gate', () => {
   const wsConnected = ref(false)
   const boothConnected = ref(false)
   const cameraSnapshot = ref(null)
+  const entrySnapshot = ref(null)
   const waitingSeconds = ref(0)
   const selectedGateOutId = ref(null)
   const alertMessage = ref(null)
@@ -121,6 +122,7 @@ export const useGateStore = defineStore('gate', () => {
           barcode,
           card_number: cardNumber,
           plate_number: plateNumber,
+          gate_out_id: selectedGateOutId.value ?? undefined,
         }),
       })
       if (res.found && res.transaction) {
@@ -147,7 +149,7 @@ export const useGateStore = defineStore('gate', () => {
    * Confirm cash payment.
    * Returns { success, change_amount, message } — caller handles notifications.
    */
-  async function confirmCashPayment({ gateId, gateOutId, paidAmount, vehicleTypeId = null }) {
+  async function confirmCashPayment({ gateId, gateOutId, paidAmount, vehicleTypeId = null, plateNumber = null, autoOpen = false }) {
     isLoading.value = true
     try {
       const { fetchApi } = useApi()
@@ -157,14 +159,15 @@ export const useGateStore = defineStore('gate', () => {
           gate_id: gateId,
           gate_out_id: gateOutId,
           barcode: currentTransaction.value?.barcode,
-          plate_number: currentTransaction.value?.plate_number,
-          paid_amount: paidAmount,
+          plate_number: currentTransaction.value?.plate_number || plateNumber,
+          paid_amount: paidAmount ?? undefined, // null = server charges the exact fee
           vehicle_type_id: vehicleTypeId,
         }),
       })
       if (res.success) {
         changeAmount.value = res.change_amount || 0
-        awaitingGateOpen.value = true
+        // autoOpen: caller opens the gate itself, so skip the "Buka Palang" screen.
+        awaitingGateOpen.value = !autoOpen
         return res
       }
       return res
@@ -311,20 +314,26 @@ export const useGateStore = defineStore('gate', () => {
   /**
    * Handle incoming WebSocket event.
    */
+  // Canonical controller track numbers (shared/audio_tracks.py) mapped to the
+  // browser files. The controller and the POS use different file sets, so the
+  // numbers must follow the controller semantics, not the mp3 filename order.
   const AUDIO_TRACK_MAP = {
-    1: '001_selamat_datang.mp3',
-    2: '002_ambil_tiket.mp3',
-    3: '003_kartu_tidak_valid.mp3',
+    1: '001_selamat_datang.mp3',   // legacy welcome
+    2: '002_ambil_tiket.mp3',      // take ticket
+    3: '003_kartu_tidak_valid.mp3',// card not registered
     4: '004_member_tidak_aktif.mp3',
     5: '005_tunggu_petugas.mp3',
-    6: '006_saldo_kurang.mp3',
-    7: '007_kartu_salah.mp3',
+    6: '009_terima_kasih.mp3',     // controller 6 = thank you
+    7: '001_selamat_datang.mp3',   // controller 7 = welcome
     8: '008_hubungi_petugas.mp3',
     9: '009_terima_kasih.mp3',
     10: '010_pembayaran_berhasil.mp3',
-    11: '011_transaksi_gagal.mp3',
-    12: '012_waktu_habis.mp3',
+    11: '012_waktu_habis.mp3',     // expires in 5 days
+    12: '012_waktu_habis.mp3',     // expires in 1 day
+    13: '003_kartu_tidak_valid.mp3', // card expired
+    14: '011_transaksi_gagal.mp3',   // unclosed transaction / quota
   }
+
 
   function playAudioTrack(track) {
     const filename = AUDIO_TRACK_MAP[track]
@@ -375,6 +384,8 @@ export const useGateStore = defineStore('gate', () => {
       case 'camera_snapshot':
         if (event.snapshot_type === 'exit') {
           cameraSnapshot.value = event.snapshot_url
+        } else if (event.snapshot_type === 'entry') {
+          entrySnapshot.value = event.snapshot_url
         }
         break
       case 'play_audio':
@@ -392,6 +403,7 @@ export const useGateStore = defineStore('gate', () => {
     wsConnected,
     boothConnected,
     cameraSnapshot,
+    entrySnapshot,
     waitingSeconds,
     selectedGateOutId,
     alertMessage,

@@ -1,5 +1,7 @@
 """Vehicle type Pydantic schemas."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -14,7 +16,8 @@ class VehicleTypeBase(BaseModel):
     lost_ticket_penalty: int = Field(default=0, ge=0)
     overnight_mode: str = Field(default="midnight", max_length=20)
     overnight_tariff: int = Field(default=0, ge=0)
-    is_progressive: bool = False
+    tariff_mode: Literal["flat", "hourly", "progressive"] = "hourly"
+    grace_period_minutes: int = Field(default=15, ge=0, le=1440)
 
 
 class VehicleTypeCreate(VehicleTypeBase):
@@ -34,7 +37,8 @@ class VehicleTypeUpdate(BaseModel):
     lost_ticket_penalty: int | None = Field(None, ge=0)
     overnight_mode: str | None = Field(None, max_length=20)
     overnight_tariff: int | None = Field(None, ge=0)
-    is_progressive: bool | None = None
+    tariff_mode: Literal["flat", "hourly", "progressive"] | None = None
+    grace_period_minutes: int | None = Field(None, ge=0, le=1440)
 
 
 class VehicleTypeResponse(VehicleTypeBase):

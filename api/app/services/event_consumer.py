@@ -50,17 +50,30 @@ class EventConsumer:
         while the subscribe loop has succeeded within the last 2 minutes."""
         import time as _time
 
+        # Yield once so the subscribe loop gets a chance to set _last_sub_ok
+        # before the first beat — otherwise a restart + immediate doctor run
+        # reads a missing key and reports the consumer as dead for 30s.
+        await asyncio.sleep(2)
+
         while self._running:
             try:
                 if self._last_sub_ok and (_time.monotonic() - self._last_sub_ok) < 120:
-                    await redis_client.connect()
-                    await redis_client.set("heartbeat:event-consumer", "1", ex=90)
+                    # ponytail: wait_for — a half-open pooled connection made
+                    # set() hang forever, silently freezing the beat.
+                    await asyncio.wait_for(
+                        redis_client.set("heartbeat:event-consumer", "1", ex=90),
+                        timeout=5,
+                    )
                 else:
                     with contextlib.suppress(Exception):
-                        await redis_client.connect()
-                        await redis_client.delete("heartbeat:event-consumer")
+                        await asyncio.wait_for(
+                            redis_client.delete("heartbeat:event-consumer"),
+                            timeout=5,
+                        )
             except Exception as e:
                 logger.warning("event_consumer_heartbeat_error", error=str(e))
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(redis_client.disconnect(), timeout=5)
             await asyncio.sleep(30)
 
     async def _listen(self) -> None:
@@ -83,9 +96,17 @@ class EventConsumer:
 
                 self._last_sub_ok = _time.monotonic()
 
-                async for message in pubsub.listen():
-                    if not self._running:
-                        break
+                while self._running:
+                    # Poll with a timeout so an idle-but-healthy consumer can
+                    # refresh its liveness stamp; `async for listen()` never
+                    # yields when nothing is published, which made the beat
+                    # expire 2 minutes after every start.
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=30.0
+                    )
+                    self._last_sub_ok = _time.monotonic()
+                    if message is None:
+                        continue
                     if message["type"] == "pmessage":
                         channel = message["channel"]
                         data = message["data"]
@@ -132,13 +153,14 @@ class EventConsumer:
 
     async def _handle_ticket_button_pressed(self, payload: dict) -> None:
         """Cash entry: create transaction, send print_ticket_then_open to daemon."""
-        import uuid
-
         from sqlalchemy import select
 
         from api.app.models import Gate
         from api.app.services.gate_command import publish_command
-        from api.app.services.transaction import create_entry_transaction
+        from api.app.services.transaction import (
+            create_entry_transaction,
+            generate_ticket_barcode,
+        )
         from api.database import AsyncSessionLocal
         from shared.events import PrintTicketThenOpenCommand
 
@@ -153,7 +175,7 @@ class EventConsumer:
                     logger.error("ticket_button_gate_not_found", gate_id=gate_code)
                     return
 
-                barcode = uuid.uuid4().hex[:12].upper()
+                barcode = await generate_ticket_barcode(db)
                 tx = await create_entry_transaction(
                     db,
                     barcode=barcode,
@@ -178,10 +200,19 @@ class EventConsumer:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        from sqlalchemy import select
+        from sqlalchemy import func, select
 
         from api.app.models import Gate, Member, ParkingTransaction
         from api.app.services.gate_command import publish_command
+        from shared.audio_tracks import (
+            CARD_EXPIRED,
+            CARD_NOT_REGISTERED,
+            EXPIRES_IN_1_DAY,
+            EXPIRES_IN_5_DAYS,
+            MEMBER_INACTIVE,
+            PLEASE_WAIT,
+            UNCLOSED_TRANSACTION,
+        )
         from api.app.services.transaction import create_entry_transaction
         from api.database import AsyncSessionLocal
         from shared.config import get_settings
@@ -226,7 +257,7 @@ class EventConsumer:
                             await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Tidak Ada", line2="Transaksi Aktif"))
                         else:
                             await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Valid"))
-                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=3))
+                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=CARD_NOT_REGISTERED))
                         logger.warning("rfid_exit_rejected", gate_id=gate_code, reason=msg)
                     return
 
@@ -237,32 +268,73 @@ class EventConsumer:
                 member = member_result.scalar_one_or_none()
 
                 if member is None:
-                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Terdaftar", audio_track=3))
+                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Terdaftar", audio_track=CARD_NOT_REGISTERED))
                     logger.info("rfid_member_not_found", gate_id=gate_code, card=card_number)
                     return
 
                 if not member.is_active:
-                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Aktif", audio_track=4))
+                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Tidak", line2="Aktif", audio_track=MEMBER_INACTIVE))
                     return
 
                 local_today = datetime.now(
                     ZoneInfo(get_settings().app_timezone)
                 ).date()
                 if member.valid_until and member.valid_until < local_today:
-                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Expired", line2="", audio_track=3))
+                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kartu Expired", line2="", audio_track=CARD_EXPIRED))
                     logger.info("rfid_member_expired", gate_id=gate_code, card=card_number)
                     return
 
-                # Check for unclosed active transaction
-                unclosed = await db.execute(
-                    select(ParkingTransaction).where(
-                        ParkingTransaction.card_number == card_number,
-                        ParkingTransaction.status == "ACTIVE",
+                # Anti-passback / vehicle quota (configurable per site).
+                from api.app.models.setting import Setting
+
+                setting_rows = (
+                    await db.execute(
+                        select(Setting).where(
+                            Setting.key.in_(
+                                ["member_anti_passback", "member_max_vehicles"]
+                            )
+                        )
                     )
-                )
-                if unclosed.scalar_one_or_none():
-                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Transaksi", line2="Belum Selesai", audio_track=11))
-                    logger.info("rfid_unclosed_transaction", gate_id=gate_code, card=card_number)
+                ).scalars().all()
+                setting_map = {row.key: row.value for row in setting_rows}
+                anti_passback = str(
+                    setting_map.get("member_anti_passback", "true")
+                ).strip().lower() not in ("false", "0", "no", "off")
+                try:
+                    max_vehicles = int(setting_map.get("member_max_vehicles") or 1)
+                except (TypeError, ValueError):
+                    max_vehicles = 1
+
+                active_count = (
+                    await db.execute(
+                        select(func.count())
+                        .select_from(ParkingTransaction)
+                        .where(
+                            ParkingTransaction.card_number == card_number,
+                            ParkingTransaction.status == "ACTIVE",
+                        )
+                    )
+                ).scalar_one()
+
+                if anti_passback and active_count > 0:
+                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Transaksi", line2="Belum Selesai", audio_track=UNCLOSED_TRANSACTION))
+                    logger.info(
+                        "rfid_anti_passback_rejected",
+                        gate_id=gate_code,
+                        card=card_number,
+                        active=active_count,
+                    )
+                    return
+
+                if not anti_passback and max_vehicles > 0 and active_count >= max_vehicles:
+                    await publish_command(RejectCardCommand(gate_id=gate_code, line1="Kuota", line2="Kendaraan Penuh", audio_track=PLEASE_WAIT))
+                    logger.info(
+                        "rfid_vehicle_quota_rejected",
+                        gate_id=gate_code,
+                        card=card_number,
+                        active=active_count,
+                        max_vehicles=max_vehicles,
+                    )
                     return
 
                 # Expiry warning — warn but allow entry (matches legacy MT00011/MT00012 behavior)
@@ -274,10 +346,10 @@ class EventConsumer:
                     # before the open command, preserving the warning UX.
                     if days_left == 1:
                         await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Kartu Habis", line2="Dalam 1 Hari"))
-                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=12))
+                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=EXPIRES_IN_1_DAY))
                     elif days_left == 5:
                         await publish_command(DisplayTextCommand(gate_id=gate_code, line1="Kartu Habis", line2="Dalam 5 Hari"))
-                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=11))
+                        await publish_command(PlayAudioCommand(gate_id=gate_code, track=EXPIRES_IN_5_DAYS))
 
                 await create_entry_transaction(
                     db,

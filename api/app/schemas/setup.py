@@ -106,6 +106,10 @@ class TestDeviceRequest(BaseModel):
     baudrate: int | None = 9600
     host: str | None = None
     port: int | None = None
+    # Serial devices on booth-driven lanes live on the cashier PC, not on the
+    # server; the gate id lets the API report booth connectivity instead of
+    # probing a port that cannot exist here.
+    gate_id: int | None = None
 
 
 class TestDeviceResponse(BaseModel):

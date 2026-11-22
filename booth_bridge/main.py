@@ -341,6 +341,49 @@ async def main() -> None:
                 logger.warning("hardware_status_broadcast_failed", error=str(e))
             await asyncio.sleep(5)
 
+    async def _poll_pending_open() -> None:
+        """Execute admin-queued opens for this booth (Buka Gate from the server).
+
+        The server cannot reach the serial relay; it stores the command in
+        Redis and we take it here every 2s. POS opens still go through the
+        websocket and are unaffected.
+        """
+        while True:
+            opener = gate_opener_state.get("opener")
+            booth_code = config.get("code")
+            if api_client is not None and booth_code and opener is not None:
+                try:
+                    result = await api_client.take_pending_open(booth_code)
+                    command = (result or {}).get("command")
+                    if command and command.get("gate_code") != gate_code:
+                        # Strict gate ownership: this booth only drives its own
+                        # relay. Never open another gate's barrier.
+                        logger.warning(
+                            "admin_open_gate_mismatch",
+                            command_gate=command.get("gate_code"),
+                            booth_gate=gate_code,
+                        )
+                    elif command:
+                        if not opener.is_present():
+                            logger.error(
+                                "admin_open_failed_hardware_missing",
+                                gate=gate_code,
+                                device=getattr(opener, "device", None),
+                            )
+                            ok = False
+                        else:
+                            ok = await opener.open()
+                        logger.info(
+                            "admin_open_executed",
+                            gate=gate_code,
+                            ok=ok,
+                            reason=command.get("reason"),
+                            requested_by=command.get("requested_by"),
+                        )
+                except Exception as e:
+                    logger.warning("pending_open_loop_error", error=str(e))
+            await asyncio.sleep(2)
+
     async def _ws_serve_lifetime() -> None:
         """Wait for ws_server's underlying serve task to terminate, then rebind.
 
@@ -498,6 +541,14 @@ async def main() -> None:
             asyncio.create_task(
                 _supervise("api_heartbeat", _send_heartbeats),
                 name="sup_api_heartbeat",
+            )
+        )
+
+    if api_client and gate_code:
+        supervisors.append(
+            asyncio.create_task(
+                _supervise("pending_open_poller", _poll_pending_open),
+                name="sup_pending_open",
             )
         )
 

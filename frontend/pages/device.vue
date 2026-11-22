@@ -19,14 +19,29 @@
           :key="gate.id"
           :gate="gate"
           :testing="testingGateId === gate.id"
+          :booths="posList"
           @edit="openGateModal(gate)"
           @test="testGate(gate)"
+          @logs="openGateLog(gate)"
+          @enable-daemon="enableGateDaemon(gate)"
           @open="openGateRemotely(gate)"
         />
       </div>
 
-      <!-- Peripheral health: printers + e-money readers at a glance -->
-      <div v-if="!loadingGates && (printers.length || emoneyReaders.length)" class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+      <!-- Peripheral health: printers + e-money readers + cameras at a glance -->
+      <div v-if="!loadingGates && (printers.length || emoneyReaders.length || cameras.length)" class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div v-if="cameras.length" class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
+          <h3 class="mb-3 text-sm font-semibold text-foreground border-b border-border pb-2">Kamera</h3>
+          <div class="space-y-2">
+            <div v-for="c in cameras" :key="c.id" class="flex items-center justify-between gap-2 text-sm">
+              <span class="truncate font-medium text-foreground">{{ c.name }}</span>
+              <div class="flex shrink-0 items-center gap-2">
+                <span class="max-w-40 truncate text-xs text-muted-foreground">{{ c.rtsp_url }}</span>
+                <StatusPill :status="c.is_active ? 'online' : 'idle'" :label="c.is_active ? 'Aktif' : 'Nonaktif'" />
+              </div>
+            </div>
+          </div>
+        </div>
         <div v-if="printers.length" class="rounded-lg border border-border bg-surface p-4 shadow-brutal-sm">
           <h3 class="mb-3 text-sm font-semibold text-foreground border-b border-border pb-2">Printer</h3>
           <div class="space-y-2">
@@ -67,6 +82,22 @@
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
           </button>
           <button
+            v-if="row.direction === 'IN' && !row.is_online"
+            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-40"
+            title="Aktifkan daemon lane"
+            :disabled="enablingGateId === row.id"
+            @click="enableGateDaemon(row)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><path d="M12 2v10" /></svg>
+          </button>
+          <button
+            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+            title="Log perangkat (live)"
+            @click="openGateLog(row)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+          </button>
+          <button
             class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
             title="Buka gate"
             @click="openGateRemotely(row)"
@@ -91,12 +122,60 @@
 
     <!-- Cameras -->
     <div v-if="activeTab === 'cameras'">
-      <DataTable :data="cameras" :columns="cameraColumns" :loading="loadingCameras" @add="openCameraModal()" @edit="openCameraModal" @delete="confirmDeleteCamera" />
+      <DataTable :data="cameras" :columns="cameraColumns" :loading="loadingCameras" @add="openCameraModal()" @edit="openCameraModal" @delete="confirmDeleteCamera">
+        <template #row-actions="{ row }">
+          <div class="relative">
+            <button
+              class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+              title="Menu"
+              @click.stop="toggleRowMenu('camera', row.id)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+            </button>
+            <div
+              v-if="rowMenu === `camera-${row.id}`"
+              class="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-md border border-border bg-surface shadow-lg"
+            >
+              <button
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:opacity-50"
+                :disabled="testingCameraId === row.id"
+                @click="testCameraRow(row)"
+              >
+                {{ testingCameraId === row.id ? 'Menguji…' : 'Test Kamera' }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </DataTable>
     </div>
 
     <!-- Printers -->
     <div v-if="activeTab === 'printers'">
-      <DataTable :data="printers" :columns="printerColumns" :loading="loadingPrinters" @add="openPrinterModal()" @edit="openPrinterModal" @delete="confirmDeletePrinter" />
+      <DataTable :data="printers" :columns="printerColumns" :loading="loadingPrinters" @add="openPrinterModal()" @edit="openPrinterModal" @delete="confirmDeletePrinter">
+        <template #row-actions="{ row }">
+          <div class="relative">
+            <button
+              class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+              title="Menu"
+              @click.stop="toggleRowMenu('printer', row.id)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+            </button>
+            <div
+              v-if="rowMenu === `printer-${row.id}`"
+              class="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-md border border-border bg-surface shadow-lg"
+            >
+              <button
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:opacity-50"
+                :disabled="testingPrinterId === row.id"
+                @click="testPrinterRow(row)"
+              >
+                {{ testingPrinterId === row.id ? 'Menguji…' : 'Test Print' }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </DataTable>
     </div>
 
     <!-- E-Money Readers -->
@@ -170,6 +249,19 @@
     <CrudModal v-model="printerModalVisible" :title="printerEditing ? 'Edit Printer' : 'Tambah Printer'" :fields="printerFields" :initial-data="printerForm" :submitting="submitting" @submit="savePrinter" />
     <CrudModal v-model="emoneyReaderModalVisible" :title="emoneyReaderEditing ? 'Edit E-Money Reader' : 'Tambah E-Money Reader'" :fields="emoneyReaderFields" :initial-data="emoneyReaderForm" :submitting="submitting" @submit="saveEmoneyReader" />
     <ConfirmDialog v-model="deleteDialogVisible" :title="`Hapus ${deleteTargetName}`" :message="`Apakah Anda yakin ingin menghapus ${deleteTargetName}?`" :loading="submitting" @confirm="executeDelete" />
+
+    <GateLogDialog v-model:open="logDialogVisible" :gate="logTarget" />
+
+    <Dialog :open="cameraTestVisible" @update:open="(v) => { if (!v) cameraTestVisible = false }">
+      <DialogContent class="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Test Kamera — {{ cameraTestName }}</DialogTitle>
+        </DialogHeader>
+        <p v-if="cameraTestLoading" class="text-sm text-muted-foreground">Mengambil snapshot…</p>
+        <p v-else-if="cameraTestError" class="text-sm font-medium text-destructive">{{ cameraTestError }}</p>
+        <img v-else-if="cameraTestImage" :src="cameraTestImage" alt="Snapshot kamera" class="w-full rounded-md border border-border" >
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -178,6 +270,7 @@ import GateStatusCard from '~/components/dashboard/GateStatusCard.vue'
 import StatusPill from '~/components/setup/StatusPill.vue'
 import DeviceProbeRow from '~/components/setup/DeviceProbeRow.vue'
 import GateTestButton from '~/components/setup/GateTestButton.vue'
+import GateLogDialog from '~/components/device/GateLogDialog.vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/components/ui/dialog'
 
 definePageMeta({ middleware: 'auth' })
@@ -224,11 +317,90 @@ const gateTestVisible = ref(false)
 const gateTestTarget = ref(null)
 function openGateTest(gate) { gateTestTarget.value = gate; gateTestVisible.value = true }
 
+// Enable the gate-in daemon for a lane added after installation.
+const enablingGateId = ref(null)
+async function enableGateDaemon(gate) {
+  enablingGateId.value = gate.id
+  const { toast } = await import('vue-sonner')
+  try {
+    const res = await fetchApi(`/api/gates/${gate.id}/enable-daemon`, { method: 'POST' })
+    toast.success(`Daemon ${gate.code} aktif (${res.state})`)
+    await loadGates()
+  } catch (err) {
+    const detail = err?.data?.detail
+    toast.error(Array.isArray(detail) ? detail.map(d => d?.msg || d).join('; ') : (detail || err.message || 'Gagal mengaktifkan daemon'))
+  } finally {
+    enablingGateId.value = null
+  }
+}
+
+// Live technician log for the lane's gate daemon.
+const logDialogVisible = ref(false)
+const logTarget = ref(null)
+function openGateLog(gate) { logTarget.value = gate; logDialogVisible.value = true }
+
+// Three-dot row menu (camera / printer test).
+const rowMenu = ref(null)
+function toggleRowMenu(kind, id) {
+  rowMenu.value = rowMenu.value === `${kind}-${id}` ? null : `${kind}-${id}`
+}
+
+// Camera snapshot test (server proxies the RTSP frame).
+const testingCameraId = ref(null)
+const cameraTestVisible = ref(false)
+const cameraTestLoading = ref(false)
+const cameraTestError = ref('')
+const cameraTestImage = ref('')
+const cameraTestName = ref('')
+async function testCameraRow(camera) {
+  rowMenu.value = null
+  testingCameraId.value = camera.id
+  cameraTestName.value = camera.name
+  cameraTestVisible.value = true
+  cameraTestLoading.value = true
+  cameraTestError.value = ''
+  cameraTestImage.value = ''
+  try {
+    const res = await fetch(`/api/cameras/${camera.id}/test`, { credentials: 'include' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+    cameraTestImage.value = `data:image/jpeg;base64,${data.snapshot}`
+  } catch (err) {
+    cameraTestError.value = err.message || 'Gagal mengambil snapshot'
+  } finally {
+    cameraTestLoading.value = false
+    testingCameraId.value = null
+  }
+}
+
+// Printer test (server picks the transport that answers).
+const testingPrinterId = ref(null)
+async function testPrinterRow(printer) {
+  rowMenu.value = null
+  testingPrinterId.value = printer.id
+  const { toast } = await import('vue-sonner')
+  try {
+    const res = await fetch(`/api/printers/${printer.id}/test`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+    toast.success(`${printer.name}: ${data.detail || 'test print terkirim'}`)
+  } catch (err) {
+    toast.error(`Test print gagal: ${err.message}`)
+  } finally {
+    testingPrinterId.value = null
+  }
+}
+
 async function testGate(gate) {
   testingGateId.value = gate.id
   try {
     const body = gate.protocol === 'serial'
-      ? { type: 'serial', device: gate.controller_device, baudrate: gate.controller_baudrate || 9600 }
+      ? { type: 'serial', device: gate.controller_device, baudrate: gate.controller_baudrate || 9600, gate_id: gate.id }
       : { type: 'tcp', host: gate.controller_host, port: gate.controller_port }
     const res = await fetchApi('/api/setup/test-device', { method: 'POST', body: JSON.stringify(body) })
     const { toast } = await import('vue-sonner')
@@ -244,12 +416,21 @@ async function testGate(gate) {
 
 async function openGateRemotely(gate) {
   try {
-    await fetchApi(`/api/gates/${gate.id}/open`, { method: 'POST' })
+    // Explicit body: the endpoint declares a pydantic request model, so an
+    // empty POST body is rejected with 422 (surfaced as "[object Object]").
+    await fetchApi(`/api/gates/${gate.id}/open`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Manual open from device page' }),
+    })
     const { toast } = await import('vue-sonner')
     toast.success(`${gate.code} dibuka`)
   } catch (err) {
     const { toast } = await import('vue-sonner')
-    toast.error(err.message)
+    const detail = err?.data?.detail
+    const msg = Array.isArray(detail)
+      ? detail.map((d) => d?.msg || JSON.stringify(d)).join('; ')
+      : (detail || err?.message || 'Gagal membuka gate')
+    toast.error(msg)
   }
 }
 
@@ -259,16 +440,29 @@ const loadingGates = ref(false)
 const gateModalVisible = ref(false)
 const gateEditing = ref(false)
 const gateForm = ref({})
+// Snapshot of the saved hardware_config while the edit modal is open: the
+// modal only submits declared fields, so merging against the live form alone
+// silently wiped lane_type / open_command / printer_id on every save.
+const gateEditingHw = ref({})
 const gateColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
   { prop: 'code', label: 'Kode', width: 120, sortable: true },
   { prop: 'direction', label: 'Arah', width: 80, type: 'enum' },
   { prop: 'protocol', label: 'Protokol', width: 100 },
-  { prop: 'controller_host', label: 'Host / Device', width: 160, formatter: (row) => row.protocol === 'serial' ? (row.controller_device || '-') : (row.controller_host || '-') },
+  { prop: 'controller_host', label: 'Host / Device', width: 160, formatter: (_, row) => row.protocol === 'serial' ? (row.controller_device || '-') : (row.controller_host || '-') },
   { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },
 ]
 const RFID_CONN_OPTIONS = [{ label: 'Controller (Wiegand)', value: 'controller' }, { label: 'Serial Langsung / USB', value: 'direct_serial' }]
 const EMONEY_CONN_OPTIONS = [{ label: 'Controller (QR5 Tunnel)', value: 'controller' }, { label: 'Serial Langsung / USB', value: 'direct_serial' }]
+
+const cameraOptions = computed(() => [
+  { label: '— tidak ada —', value: '' },
+  ...cameras.value.map((c) => ({ label: c.name, value: c.id })),
+])
+const printerOptions = computed(() => [
+  { label: '— tidak ada —', value: '' },
+  ...printers.value.map((p) => ({ label: `${p.name} (${p.mode})`, value: p.id })),
+])
 
 const gateFields = computed(() => {
   const dir = gateForm.value.direction
@@ -288,6 +482,9 @@ const gateFields = computed(() => {
       ? [
           { prop: 'controller_device', label: 'Device Serial', type: 'text', placeholder: '/dev/parking-gate', required: true },
           { prop: 'controller_baudrate', label: 'Baudrate', type: 'number', placeholder: '9600' },
+          { prop: 'open_command', label: 'Perintah Buka (hex/ASCII)', type: 'text', placeholder: 'A00101A2 atau *TRIG1#' },
+          { prop: 'close_command', label: 'Perintah Tutup (opsional)', type: 'text', placeholder: 'A00100A1' },
+          { prop: 'close_delay_seconds', label: 'Tutup otomatis (detik)', type: 'number', placeholder: '3' },
         ]
       : [
           { prop: 'controller_host', label: 'Host Controller', type: 'ip-scan', portProp: 'controller_port', placeholder: '192.168.1.x', required: true },
@@ -296,6 +493,13 @@ const gateFields = computed(() => {
     ),
     { prop: 'has_close_sensor', label: 'Sensor Tutup', type: 'boolean' },
     { prop: 'relay_mode', label: 'Mode Relay', type: 'select', options: [{ label: 'Single (1 relay)', value: 'SINGLE' }, { label: 'Dual (2 relay)', value: 'DUAL' }, { label: 'Triple (3 relay)', value: 'TRIPLE' }] },
+    { prop: 'lane_reset_mode', label: 'Reset lane pakai', type: 'select', options: [
+      { label: 'Ikut pengaturan global', value: '' },
+      { label: 'Timer saja', value: 'time' },
+      { label: 'IN3OFF saja', value: 'in3off' },
+      { label: 'IN3OFF + timer', value: 'both' },
+    ], helper: 'Khusus gate masuk: penentu kapan lane siap lagi untuk kendaraan berikutnya.' },
+    { prop: 'lane_reset_seconds', label: 'Jeda reset lane (detik)', type: 'number', placeholder: 'kosong = ikut pengaturan global', helper: 'Dipakai untuk mode timer / IN3OFF + timer.' },
   ]
 
   if (dir === 'IN') {
@@ -309,14 +513,16 @@ const gateFields = computed(() => {
         ] : []),
       ] : []),
       { prop: '_ticket_printer_enabled', label: 'Printer Tiket', type: 'boolean' },
+      { prop: '_printer_id', label: 'Printer (perangkat)', type: 'select', options: printerOptions.value },
       { prop: '_emoney_enabled', label: 'E-Money', type: 'boolean' },
       { prop: '_camera_enabled', label: 'Kamera', type: 'boolean' },
+      { prop: '_camera_id', label: 'Kamera (perangkat)', type: 'select', options: cameraOptions.value },
       { prop: '_display_enabled', label: 'Modul Display (LED)', type: 'boolean', helper: 'Centang HANYA jika controller punya modul display. cmd_ds ke controller tanpa display akan disconnect.' },
       { prop: '_audio_enabled', label: 'Modul Audio (MP3)', type: 'boolean' },
     )
   } else if (dir === 'OUT') {
     base.push(
-      { prop: 'pos_id', label: 'Booth POS', type: 'select', options: posOptions.value },
+      { prop: 'pos_id', label: 'Booth POS', type: 'select', options: posOptions.value, helper: 'Kosongkan bila relay gate ini belum terpasang (tombol Buka Gate akan menolak).' },
       { prop: '_rfid_enabled', label: 'RFID Member Reader', type: 'boolean' },
       ...(rfidEnabled ? [
         { prop: '_rfid_connection', label: 'Koneksi RFID', type: 'select', options: RFID_CONN_OPTIONS },
@@ -339,6 +545,8 @@ const gateFields = computed(() => {
         { prop: '_uhf_reader_port', label: 'Port UHF', type: 'number', placeholder: '6000', required: true },
       ] : []),
       { prop: '_camera_enabled', label: 'Kamera', type: 'boolean' },
+      { prop: '_camera_id', label: 'Kamera (perangkat)', type: 'select', options: cameraOptions.value },
+      { prop: '_printer_id', label: 'Printer (perangkat)', type: 'select', options: printerOptions.value },
       { prop: '_display_enabled', label: 'Modul Display (LED)', type: 'boolean', helper: 'Centang HANYA jika controller punya modul display.' },
       { prop: '_audio_enabled', label: 'Modul Audio (MP3)', type: 'boolean' },
     )
@@ -360,6 +568,13 @@ function flattenHardwareConfig(hw = {}) {
     _emoney_device: hw.emoney?.device ?? '',
     _emoney_baudrate: hw.emoney?.baudrate ?? 38400,
     _camera_enabled: hw.camera?.enabled ?? false,
+    lane_reset_mode: hw.lane_reset_mode ?? '',
+    lane_reset_seconds: hw.lane_reset_seconds ?? '',
+    open_command: hw.open_command ?? '',
+    close_command: hw.close_command ?? '',
+    close_delay_seconds: hw.close_delay_seconds ?? 3,
+    _camera_id: (hw.camera_ids && hw.camera_ids[0]) || hw.camera_id || null,
+    _printer_id: hw.printer_id ?? null,
     _uhf_reader_enabled: hw.uhf_reader?.enabled ?? false,
     _uhf_reader_host: hw.uhf_reader?.host ?? '',
     _uhf_reader_port: hw.uhf_reader?.port ?? 6000,
@@ -368,7 +583,34 @@ function flattenHardwareConfig(hw = {}) {
   }
 }
 function buildHardwareConfig(form) {
-  const hw = {}
+  // Preserve keys this form does not expose (track_map, inline cameras, ...).
+  const hw = { ...(form.hardware_config || gateEditingHw.value || {}) }
+  // `cameras` is a response-only expansion of camera_ids; never persist it.
+  delete hw.cameras
+
+  if (form.lane_reset_mode) {
+    hw.lane_reset_mode = form.lane_reset_mode
+  } else {
+    delete hw.lane_reset_mode
+  }
+
+  if (form.lane_reset_seconds !== '' && form.lane_reset_seconds !== null && form.lane_reset_seconds !== undefined) {
+    hw.lane_reset_seconds = Number(form.lane_reset_seconds)
+  } else {
+    delete hw.lane_reset_seconds
+  }
+
+  const cameraId = form._camera_id ? Number(form._camera_id) : null
+  hw.camera_ids = cameraId ? [cameraId] : []
+  hw.printer_id = form._printer_id ? Number(form._printer_id) : null
+  hw.camera = { ...(hw.camera || {}), enabled: !!cameraId }
+  hw.ticket_printer = { ...(hw.ticket_printer || {}), enabled: !!hw.printer_id }
+  if (form.protocol === 'serial') {
+    hw.open_command = form.open_command ?? hw.open_command ?? ''
+    hw.close_command = form.close_command ?? hw.close_command ?? ''
+    hw.close_delay_seconds = Number(form.close_delay_seconds ?? hw.close_delay_seconds ?? 3) || 3
+  }
+
   if (form._rfid_enabled !== undefined) {
     hw.rfid = {
       enabled: form._rfid_enabled,
@@ -399,6 +641,7 @@ function buildHardwareConfig(form) {
 }
 function openGateModal(row = null) {
   gateEditing.value = !!row
+  gateEditingHw.value = row?.hardware_config ? { ...row.hardware_config } : {}
   gateForm.value = row
     ? { ...row, ...flattenHardwareConfig(row.hardware_config) }
     : { direction: 'IN', protocol: 'compass', relay_mode: 'SINGLE', has_close_sensor: false, is_active: true, _rfid_connection: 'controller', _rfid_baudrate: 9600, _emoney_connection: 'controller', _emoney_baudrate: 38400 }
@@ -408,7 +651,7 @@ async function saveGate(data) {
   submitting.value = true
   try {
     const payload = { ...data, hardware_config: buildHardwareConfig(data) }
-    for (const k of ['_rfid_enabled', '_rfid_connection', '_rfid_device', '_rfid_baudrate', '_ticket_printer_enabled', '_emoney_enabled', '_emoney_connection', '_emoney_device', '_emoney_baudrate', '_camera_enabled', '_uhf_reader_enabled', '_display_enabled', '_audio_enabled']) delete payload[k]
+    for (const k of ['_rfid_enabled', '_rfid_connection', '_rfid_device', '_rfid_baudrate', '_ticket_printer_enabled', '_emoney_enabled', '_emoney_connection', '_emoney_device', '_emoney_baudrate', '_camera_enabled', '_camera_id', '_printer_id', '_uhf_reader_enabled', '_display_enabled', '_audio_enabled', 'lane_reset_seconds', 'lane_reset_mode']) delete payload[k]
     if (gateEditing.value) await gateCrud.update(data.id, payload); else await gateCrud.create(payload)
     gateModalVisible.value = false
     await loadGates()
@@ -445,6 +688,16 @@ const posColumns = [
   { prop: 'code', label: 'Kode', width: 120, sortable: true },
   { prop: 'ip_address', label: 'IP Address', width: 150 },
   { prop: 'default_gate_id', label: 'Gate Default', width: 180, formatter: (v) => gateNameById(v) },
+  { prop: 'last_seen_at', label: 'Bridge', width: 110, formatter: (v) => {
+    if (!v) return 'Belum pernah'
+    const age = Date.now() - new Date(v).getTime()
+    return age < 90_000 ? 'Online' : 'Offline'
+  } },
+  { prop: 'last_status', label: 'Relay', width: 110, formatter: (_, row) => {
+    const st = row.last_status || {}
+    if (!row.last_seen_at) return '-'
+    return st.gate_connected ? 'Terhubung' : 'Tidak ada'
+  } },
   { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },
 ]
 const posFields = computed(() => [
@@ -452,10 +705,43 @@ const posFields = computed(() => [
   { prop: 'code', label: 'Kode', type: 'text', required: true },
   { prop: 'ip_address', label: 'IP Address', type: 'text' },
   { prop: 'default_gate_id', label: 'Gate Default', type: 'select', options: gateOutOptions.value },
+  { prop: '_camera_id', label: 'Kamera (perangkat)', type: 'select', options: cameraOptions.value },
+  { prop: '_printer_id', label: 'Printer (perangkat)', type: 'select', options: printerOptions.value },
+  { prop: '_show_plate', label: 'Tampilkan isian plat nomor di POS', type: 'boolean', helper: 'Hilangkan centang bila kasir tidak memakai plat nomor sama sekali.' },
   { prop: 'is_active', label: 'Aktif', type: 'boolean' },
 ])
-function openPosModal(row = null) { posEditing.value = !!row; posForm.value = row ? { ...row } : { is_active: true }; posModalVisible.value = true }
-async function savePos(data) { submitting.value = true; try { if (posEditing.value) await posCrud.update(data.id, data); else await posCrud.create(data); posModalVisible.value = false; await loadPos() } catch (err) { console.error(err) } finally { submitting.value = false } }
+function openPosModal(row = null) {
+  posEditing.value = !!row
+  const periph = row?.booth_peripherals || {}
+  posForm.value = row
+    ? {
+        ...row,
+        _camera_id: (periph.camera_ids && periph.camera_ids[0]) || null,
+        _printer_id: periph.printer_id ?? null,
+        _show_plate: periph.ui?.show_plate !== false,
+      }
+    : { is_active: true, ip_address: '' }
+  posModalVisible.value = true
+}
+async function savePos(data) {
+  submitting.value = true
+  try {
+    const payload = { ...data }
+    payload.booth_peripherals = {
+      ...(data.booth_peripherals || {}),
+      camera_ids: data._camera_id ? [Number(data._camera_id)] : [],
+      printer_id: data._printer_id ? Number(data._printer_id) : null,
+      ui: { ...(data.booth_peripherals?.ui || {}), show_plate: data._show_plate !== false },
+    }
+    delete payload._camera_id
+    delete payload._printer_id
+    delete payload._show_plate
+    delete payload.booth_peripherals_patch
+    if (posEditing.value) await posCrud.update(data.id, payload); else await posCrud.create(payload)
+    posModalVisible.value = false
+    await loadPos()
+  } catch (err) { console.error(err) } finally { submitting.value = false }
+}
 function confirmDeletePos(row) { deleteTargetName.value = row.name; deleteAction.value = () => deletePos(row.id); deleteDialogVisible.value = true }
 async function deletePos(id) { submitting.value = true; try { await posCrud.remove(id); deleteDialogVisible.value = false; await loadPos() } catch (err) { console.error(err) } finally { submitting.value = false } }
 async function loadPos() { loadingPos.value = true; try { posList.value = await posCrud.list() } catch (err) { console.error(err) } finally { loadingPos.value = false } }
@@ -512,7 +798,7 @@ const printerFields = computed(() => {
     { prop: 'name', label: 'Nama', type: 'text', required: true },
     { prop: 'gate_id', label: 'Gate', type: 'select', required: true, options: gateCodeOptions.value },
     { prop: 'gate_type', label: 'Tipe Gate', type: 'select', required: true, options: [{ label: 'Masuk (IN)', value: 'IN' }, { label: 'Keluar (OUT)', value: 'OUT' }] },
-    { prop: 'mode', label: 'Mode', type: 'select', required: true, options: [{ label: 'Controller Passthrough', value: 'CONTROLLER_PASSTHROUGH' }, { label: 'Network (TCP/IP)', value: 'NETWORK' }, { label: 'Serial / USB', value: 'SERIAL' }] },
+    { prop: 'mode', label: 'Mode', type: 'select', required: true, options: [{ label: 'Otomatis (deteksi sendiri)', value: 'AUTO' }, { label: 'Controller Passthrough', value: 'CONTROLLER_PASSTHROUGH' }, { label: 'Network (TCP/IP)', value: 'NETWORK' }, { label: 'Serial / USB', value: 'SERIAL' }] },
     ...(mode === 'NETWORK'
       ? [
           { prop: 'ip_address', label: 'IP Address', type: 'text', required: true, placeholder: '192.168.1.x' },

@@ -59,7 +59,7 @@
         :plate-number="gateStore.currentTransaction?.plate_number || ''"
         @manual-open="openGateAction"
         @vehicle-left="vehicleLeftAction"
-        @pay-cash="showCashDialog = true"
+        @pay-cash="payCash"
         @pay-rfid="showRfidDialog = true"
         @retry-emoney="retryEmoney"
         @cancel-correction="cancelCorrection"
@@ -75,6 +75,7 @@
         :payment-state="gateStore.paymentState"
         :emoney-state="gateStore.emoneyPaymentState"
         :vehicle-types="websiteStore.vehicleTypes"
+        :lane-vehicle-type-options="carLaneOptions"
         :timeout-seconds="timeoutSeconds"
         :can-pay-cash="gateStore.canPayCash"
         :can-pay-emoney="gateStore.canPayEmoney"
@@ -83,6 +84,8 @@
         :awaiting-gate-open="gateStore.awaitingGateOpen"
         :is-processing="isPaymentProcessing"
         :is-mixed-lane="isMixedLane"
+        :emoney-enabled="emoneyEnabled"
+        :entry-snapshot-url="entrySnapshotUrl"
         :active-vehicle-type-id="activeVehicleTypeId"
         :active-tariff="displayTariff"
         :shift-name="posSession.shiftName"
@@ -90,11 +93,20 @@
         :cash-collected="posSession.cashCollected"
         :last-entry="lastEntry"
         @barcode-lookup="onBarcodeLookup"
-        @pay-cash="showCashDialog = true"
+        @plate-lookup="onPlateLookup"
+        @plate-entered="onPlateEntered"
+        @pay-cash="payCash"
         @pay-emoney="startEmoneyPayment"
         @retry-emoney="retryEmoney"
         @cancel-emoney="cancelEmoney"
         @update:vehicle-type-id="onVehicleTypeChange"
+        :show-plate="showPlate"
+        :plate-prefix="platePrefix"
+        :lane-vehicle-type-name="laneVehicleTypeName"
+        :fallback-plate="pendingPlate"
+        @manual-open="requestManualOpen"
+        @reprint-receipt="reprintReceipt"
+        @gate-open="onIdleGateOpen"
       />
     </div>
 
@@ -108,7 +120,11 @@
         :gate-name="selectedGate?.name || ''"
         :shift-name="posSession.shiftName"
         :is-mixed-lane="isMixedLane"
+        :emoney-enabled="emoneyEnabled"
+        :entry-snapshot-url="entrySnapshotUrl"
         :active-vehicle-type-name="activeVehicleTypeName"
+        @manual-open="requestManualOpen"
+        @reprint-receipt="reprintReceipt"
       />
     </template>
 
@@ -149,6 +165,15 @@
     <PosRfidDialog
       v-model:open="showRfidDialog"
       @confirm="confirmRfidPayment"
+    />
+
+    <!-- Manual gate open (supervisor/admin password) -->
+    <PosManualOpenDialog
+      v-model:open="showManualOpen"
+      :gate-name="selectedGate?.name || ''"
+      :loading="manualOpenLoading"
+      :error="manualOpenError"
+      @confirm="submitManualOpen"
     />
   </NuxtLayout>
 </template>
@@ -228,6 +253,13 @@ let boothWsReconnectAttempts = 0
 const BOOTH_MAX_RECONNECT_ATTEMPTS = 10
 const showCashDialog = ref(false)
 const showRfidDialog = ref(false)
+const showManualOpen = ref(false)
+const manualOpenLoading = ref(false)
+const manualOpenError = ref('')
+const boothPeripherals = ref({})
+// Plate typed by the operator before scanning; kept for display after the
+// ticket lookup replaces the idle form (cash tickets often have no plate).
+const pendingPlate = ref('')
 const emoneyBalance = ref(null)
 const isPaymentProcessing = ref(false)
 const lastEntry = ref(null)
@@ -319,6 +351,16 @@ watch(
   { deep: true },
 )
 
+watch(() => gateStore.entrySnapshot, (url) => {
+  if (!url) return
+  lastEntry.value = {
+    plateNumber: gateStore.currentTransaction?.plate_number || '',
+    snapshotUrl: url,
+    gateLabel: selectedGate.value?.name || null,
+    subtitle: 'baru saja masuk',
+  }
+})
+
 onBeforeUnmount(() => {
   for (const timer of _disconnectTimers.values()) clearTimeout(timer)
   _disconnectTimers.clear()
@@ -328,7 +370,11 @@ const gatecameras = computed(() => {
   const hw = selectedGate.value?.hardware_config
   if (!hw) return []
   const list = hw.cameras || []
-  if (list.length) return list.filter((c) => c.url && c.enabled !== false)
+  if (list.length) {
+    return list
+      .filter((c) => (c.url || c.preview_url) && c.enabled !== false)
+      .map((c) => ({ ...c, url: c.preview_url || c.url }))
+  }
   const cam = hw.camera
   if (cam?.enabled && cam?.url) return [{ url: cam.url, label: null }]
   return []
@@ -356,6 +402,19 @@ const activeVehicleTypeName = computed(() => {
   return websiteStore.vehicleTypes.find((t) => t.id === activeVehicleTypeId.value)?.name || null
 })
 
+// Car exit lane: dropdown "2. Mobil" / "3. Box" (Mobil first = default).
+const CAR_TYPE = /mobil|car|box/i
+const carLaneOptions = computed(() => {
+  if (isMixedLane.value) return []
+  const defId = selectedGate.value?.hardware_config?.default_vehicle_type_id
+  const def = websiteStore.vehicleTypes.find((t) => t.id === defId)
+  if (!def || !CAR_TYPE.test(def.name)) return []
+  return websiteStore.vehicleTypes
+    .filter((t) => CAR_TYPE.test(t.name))
+    .sort((a, b) => Number(/box/i.test(a.name)) - Number(/box/i.test(b.name)))
+    .map((t, i) => ({ id: t.id, label: `${i + 2}. ${t.name}` }))
+})
+
 const emoneyCardInfo = computed(() => {
   const tx = gateStore.currentTransaction
   if (!tx?.card_number) return null
@@ -367,11 +426,17 @@ const emoneyCardInfo = computed(() => {
 
 // Sync displayTariff when transaction loads/clears
 watch(() => gateStore.currentTransaction, (tx) => {
+  if (!tx) pendingPlate.value = ''
   displayTariff.value = tx?.tariff || tx?.fee || 0
   if (isMixedLane.value) activeVehicleTypeId.value = tx?.vehicle_type_id ?? null
-  if (tx?.entry_snapshot_id && tx?.plate_number) {
+  // Fixed lane: every new ticket starts back at the lane default (Mobil).
+  else activeVehicleTypeId.value = selectedGate.value?.hardware_config?.default_vehicle_type_id || null
+  // Cash tickets have no plate — show the entry snapshot anyway (barcode as
+  // the label). Previously the panel stayed on the live view for every cash
+  // vehicle.
+  if (tx?.entry_snapshot_id && (tx?.plate_number || tx?.barcode)) {
     lastEntry.value = {
-      plateNumber: tx.plate_number,
+      plateNumber: tx.plate_number || tx.barcode,
       snapshotUrl: `/api/snapshots/${tx.entry_snapshot_id}/image`,
       gateLabel: tx.entry_gate_name || tx.entry_gate_code || null,
       subtitle: 'baru saja masuk',
@@ -388,19 +453,33 @@ watch(selectedGate, (gate) => {
   }
 }, { immediate: true })
 
-function selectVehicleType(namePattern) {
-  if (!isMixedLane.value) return
-  const vt = websiteStore.vehicleTypes.find((t) => namePattern.test(t.name))
-  if (vt) onVehicleTypeChange(vt.id)
+function selectVehicleTypeKey(key) {
+  if (!gateStore.currentTransaction) {
+    toast.warning('Pindai tiket terlebih dulu')
+    return
+  }
+  const pattern = key === '1' ? /motor/i : /mobil|car|box|bus|truk/i
+  const boxVt = key === '3' ? carLaneOptions.value.find((o) => /box/i.test(o.label)) : null
+  const vt = boxVt
+    ? { id: boxVt.id }
+    : websiteStore.vehicleTypes.find((t) => pattern.test(t.name))
+  if (!vt) {
+    if (key === '3') toast.info('Box/Bus masuk kategori Mobil')
+    return
+  }
+  if (key === '3' && !boxVt) toast.info('Box/Bus dihitung sebagai Mobil')
+  onVehicleTypeChange(vt.id)
 }
 
 // Keyboard shortcuts
 useKeyboard([
   { keys: ['F1'], action: () => {
-    if (gateStore.canPayCash) showCashDialog.value = true
+    if (!emoneyEnabled.value) return // cash-only: Enter pays
+    if (gateStore.canPayCash) payCash()
     else toast.warning('Bayar Cash belum tersedia — pindai tiket terlebih dulu')
   } },
   { keys: ['F2'], action: () => {
+    if (!emoneyEnabled.value) return
     if (gateStore.canPayEmoney) startEmoneyPayment()
     else toast.warning('E-money belum tersedia — pindai tiket atau hubungkan booth bridge')
   } },
@@ -408,11 +487,19 @@ useKeyboard([
     if (gateStore.canPayRfid) showRfidDialog.value = true
     else toast.warning('Bayar RFID belum tersedia — pindai tiket terlebih dulu')
   } }, // hidden fallback
-  { keys: [' '], action: () => gateStore.awaitingGateOpen && openGateAction() },
-  { keys: ['Escape'], action: () => { showCashDialog.value = false; showRfidDialog.value = false } },
-  // `keys` is a chord (all must match), so each case needs its own entry.
-  ...['c', 'C'].map((key) => ({ keys: [key], action: () => selectVehicleType(/mobil|car/i) })),
-  ...['m', 'M'].map((key) => ({ keys: [key], action: () => selectVehicleType(/motor/i) })),
+  { keys: ['Enter'], action: () => quickCashEnter() },
+  { keys: [' '], action: () => requestManualOpen() },
+  { keys: ['F11'], action: () => requestManualOpen() },
+  { keys: ['F12'], action: () => reprintReceipt() },
+  { keys: ['Escape'], action: () => {
+    showCashDialog.value = false
+    showRfidDialog.value = false
+    showManualOpen.value = false
+  } },
+  // Numeric keys: 1=MOTOR, 2=MOBIL, 3=BOX (own type when it exists, else Mobil).
+  { keys: ['1'], action: () => selectVehicleTypeKey('1') },
+  { keys: ['2'], action: () => selectVehicleTypeKey('2') },
+  { keys: ['3'], action: () => selectVehicleTypeKey('3') },
 ], {
   // Suppress F-key/letter shortcuts while a modal owns input focus so they
   // don't hijack PIN/amount typing. Escape still passes through.
@@ -420,15 +507,59 @@ useKeyboard([
     showCashDialog.value ||
     showRfidDialog.value ||
     showCheckInDialog.value ||
-    showHandoverDialog.value,
+    showHandoverDialog.value ||
+    showManualOpen.value,
 })
 
 // Actions
+const entrySnapshotUrl = computed(() => {
+  if (lastEntry.value?.snapshotUrl) return lastEntry.value.snapshotUrl
+  const tx = gateStore.currentTransaction
+  return tx?.entry_snapshot_id ? `/api/snapshots/${tx.entry_snapshot_id}/image` : null
+})
+
+// Global city code prefix (server setting pos_plate_prefix, e.g. "H").
+const platePrefix = computed(() => {
+  const raw = websiteStore.getSetting('pos_plate_prefix', '')
+  return String(raw || '').trim().toUpperCase()
+})
+
+// Per-booth switch: hide the plate label + input entirely on this POS.
+const showPlate = computed(() => boothPeripherals.value?.ui?.show_plate !== false)
+
+const emoneyEnabled = computed(() => {
+  const raw = websiteStore.getSetting('emoney_enabled', 'true')
+  return String(raw).toLowerCase() !== 'false'
+})
+
 async function onBarcodeLookup(input) {
   const v = input?.trim()
   if (!v) return
-  const found = await gateStore.lookupTransaction({ barcode: v, plateNumber: v })
-  if (!found) toast.warning('Transaksi tidak ditemukan')
+
+  // USB RFID readers are keyboard wedges: the card number lands in the barcode
+  // box. Numeric card -> close the member transaction and open the exit gate
+  // straight away (no lookup screen).
+  if (/^\d{6,}$/.test(v)) {
+    const cardTx = await gateStore.lookupTransaction({ cardNumber: v })
+    if (cardTx) {
+      await confirmRfidPayment(v)
+      return
+    }
+  }
+
+  const found = await gateStore.lookupTransaction({ barcode: v })
+  if (!found) toast.warning('Transaksi tidak ditemukan untuk barcode tersebut')
+}
+
+function onPlateEntered(value) {
+  pendingPlate.value = value
+}
+
+async function onPlateLookup(input) {
+  const v = input?.trim().toUpperCase()
+  if (!v) return
+  const found = await gateStore.lookupTransaction({ plateNumber: v })
+  if (!found) toast.warning(`Tidak ada transaksi aktif untuk plat ${v}`)
 }
 
 async function onVehicleTypeChange(vehicleTypeId) {
@@ -441,9 +572,47 @@ async function onVehicleTypeChange(vehicleTypeId) {
       body: JSON.stringify({ transaction_id: tx.id, vehicle_type_id: vehicleTypeId }),
     })
     displayTariff.value = res.fee
+    return res.fee
   } catch (e) {
     console.error('Fee calculation failed:', e)
+    return null
   }
+}
+
+// Setting cash_auto_open (default on): cash confirm opens the gate directly,
+// no separate "Buka Palang" screen. Set to "false" to restore the two-step flow.
+const cashAutoOpen = computed(() =>
+  String(websiteStore.getSetting('cash_auto_open', 'true')).toLowerCase() !== 'false'
+)
+
+// Enter-to-pay (cash-only sites): exact fare, then auto-open.
+const txLoadedAt = ref(0)
+watch(() => gateStore.currentTransaction?.id, (id) => { txLoadedAt.value = id ? Date.now() : 0 })
+
+function payExactCash() {
+  if (!gateStore.currentTransaction || isPaymentProcessing.value) return
+  if (isMixedLane.value && !activeVehicleTypeId.value) {
+    toast.warning('Pilih jenis kendaraan dulu')
+    return
+  }
+  // No amount sent: the server charges its own computed fee.
+  confirmCashPayment(null)
+}
+
+// Cash button / F1: cash-only sites skip the amount dialog (no change counting,
+// exact fare); sites with e-money keep the dialog.
+function payCash() {
+  if (emoneyEnabled.value) showCashDialog.value = true
+  else payExactCash()
+}
+
+function quickCashEnter() {
+  // Enter after a scan means "collect exact fare and open" — cash is the
+  // default action even when an e-money reader exists; F1 keeps the dialog.
+  if (!gateStore.canPayCash) return
+  // Scanners type a trailing Enter right after the barcode; ignore it.
+  if (Date.now() - txLoadedAt.value < 800) return
+  payExactCash()
 }
 
 async function confirmCashPayment(amount) {
@@ -456,11 +625,21 @@ async function confirmCashPayment(amount) {
       gateOutId: selectedGate.value.id,
       paidAmount: amount,
       vehicleTypeId: activeVehicleTypeId.value,
+      plateNumber: pendingPlate.value || null,
+      autoOpen: cashAutoOpen.value,
     })
     if (result?.success) {
       sound.paymentSuccess()
-      posSession.addCashPayment(amount - (result.change_amount || 0))
-      toast.success('Pembayaran berhasil. Tekan Space untuk buka palang.')
+      posSession.addCashPayment(result.fee ?? (amount - (result.change_amount || 0)))
+      if (cashAutoOpen.value) {
+        const change = result.change_amount || 0
+        toast.success(change > 0
+          ? `Pembayaran berhasil. Kembalian Rp ${change.toLocaleString('id-ID')}`
+          : 'Pembayaran berhasil')
+        await openGateAction()
+      } else {
+        toast.success('Pembayaran berhasil. Tekan Space untuk buka palang.')
+      }
     } else {
       toast.error(result?.message || 'Pembayaran tunai gagal')
     }
@@ -486,6 +665,7 @@ async function confirmRfidPayment(cardNumber) {
       sound.paymentSuccess()
       posSession.addTransaction()
       toast.success(result.message || 'Pembayaran RFID berhasil')
+      await openGateAction()
     } else {
       toast.error(result?.message || 'Pembayaran RFID gagal')
     }
@@ -547,8 +727,31 @@ function cancelCorrection() {
   toast.info('Koreksi dibatalkan')
 }
 
+function waitForBoothConnection(timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const tick = () => {
+      if (gateStore.boothConnected && boothWs?.readyState === WebSocket.OPEN) return resolve(true)
+      if (Date.now() - started >= timeoutMs) return resolve(false)
+      setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
 async function openGateAction() {
   if (!selectedGate.value) return
+
+  // Recover from a bridge restart: the socket may have dropped while the POS
+  // was idle. Try one fresh connection before falling back to the API (which
+  // refuses to fake an exit open).
+  if (!gateStore.boothConnected || boothWs?.readyState !== WebSocket.OPEN) {
+    connectBooth()
+    if (!(await waitForBoothConnection(1500))) {
+      toast.error('Booth bridge tidak terhubung — reload POS atau cek service booth-bridge-booth di PC kasir')
+      return
+    }
+  }
 
   // Attended OUT gates: drive booth_bridge directly (no daemon at exit).
   // Frontend only requests the open — hardware path + hex live in the
@@ -575,6 +778,72 @@ async function openGateAction() {
   }
 }
 
+function onIdleGateOpen() {
+  if (!gateStore.currentTransaction) {
+    toast.warning('Pindai tiket atau ketik plat nomor dulu, lalu bayar di layar transaksi')
+    return
+  }
+  if (gateStore.awaitingGateOpen) openGateAction()
+  else toast.warning('Selesaikan pembayaran dulu untuk membuka palang')
+}
+
+function requestManualOpen() {
+  // After a payment the giant "Buka Palang" button owns the action; elsewhere
+  // the operator must authorise it with a supervisor/admin account.
+  if (gateStore.awaitingGateOpen) {
+    openGateAction()
+    return
+  }
+  manualOpenError.value = ''
+  showManualOpen.value = true
+}
+
+async function submitManualOpen({ username, password, reason }) {
+  if (!selectedGate.value) return
+  // Exit lanes are opened by the booth bridge on the cashier PC. Without that
+  // websocket there is nothing to shoot the relay command at.
+  if (!gateStore.boothConnected || !boothWs) {
+    manualOpenError.value = 'Booth bridge tidak terhubung — palang tidak bisa dibuka dari POS ini.'
+    return
+  }
+  manualOpenLoading.value = true
+  manualOpenError.value = ''
+  try {
+    await fetchApi(`/api/gates/${selectedGate.value.id}/manual-open`, {
+      method: 'POST',
+      body: JSON.stringify({ username, password, reason }),
+    })
+    if (gateStore.boothConnected && boothWs) {
+      boothWs.send(JSON.stringify({
+        action: 'open_gate',
+        gate_code: selectedGate.value.code,
+      }))
+      toast.success('Palang pintu dibuka (manual)')
+    } else {
+      toast.success('Otorisasi diterima — perintah buka dikirim')
+    }
+    gateStore.clearTransaction()
+    showManualOpen.value = false
+  } catch (err) {
+    manualOpenError.value = err?.data?.detail || err?.message || 'Gagal otorisasi buka manual'
+  } finally {
+    manualOpenLoading.value = false
+  }
+}
+
+async function reprintReceipt() {
+  if (!selectedGate.value) return
+  try {
+    await fetchApi('/api/pos/reprint-receipt', {
+      method: 'POST',
+      body: JSON.stringify({ gate_id: selectedGate.value.id }),
+    })
+    toast.success('Struk terakhir dikirim ke printer')
+  } catch (err) {
+    toast.error(err?.data?.detail || err?.message || 'Gagal mencetak struk')
+  }
+}
+
 function vehicleLeftAction() {
   gateStore.clearTransaction()
   toast.info('Kendaraan pergi — transaksi dibersihkan')
@@ -584,13 +853,6 @@ function vehicleLeftAction() {
 function connectBooth() {
   if (boothWs) {
     try { boothWs.close() } catch { /* ignore */ }
-  }
-
-  if (boothWsReconnectAttempts >= BOOTH_MAX_RECONNECT_ATTEMPTS) {
-    console.warn('Booth bridge: max reconnect attempts reached, giving up')
-    gateStore.setBoothConnected(false)
-    resetBoothHardware()
-    return
   }
 
   const boothUrl = config.public.boothBridgeUrl || 'ws://localhost:5678/'
@@ -616,7 +878,9 @@ function connectBooth() {
     resetBoothHardware()
     if (!boothWsReconnectTimer) {
       boothWsReconnectAttempts++
-      const delay = Math.min(3000 * Math.pow(2, boothWsReconnectAttempts - 1), 60000)
+      // Never give up: the bridge can be restarted at any time. Cap the delay
+      // so recovery is quick once it is back.
+      const delay = Math.min(2000 * Math.pow(2, Math.min(boothWsReconnectAttempts - 1, 3)), 10000)
       boothWsReconnectTimer = setTimeout(() => {
         boothWsReconnectTimer = null
         connectBooth()
@@ -748,7 +1012,16 @@ function onWorkerBadgeClick() {
 }
 
 function workerErrorText(err) {
-  return err.status === 401 ? 'PIN salah' : (err.message || 'Gagal memproses')
+  if (err.status === 401) return 'PIN salah — coba lagi atau minta admin reset PIN'
+  const msg = err?.data?.detail || err.message || 'Gagal memproses'
+  // Actionable hints for the two most common blockers.
+  if (/shift aktif|No active shift/i.test(msg)) {
+    return 'Belum ada shift aktif untuk jam ini. Minta admin membuat master Shift dan penugasan hari ini (Jadwal Shift).'
+  }
+  if (/Penugasan|assignment/i.test(msg)) {
+    return 'Penugasan tidak cocok. Minta admin membuat penugasan hari ini untuk gate ini (Jadwal Shift → Penugasan).'
+  }
+  return msg
 }
 
 async function onCheckIn(payload) {
@@ -828,6 +1101,7 @@ onMounted(async () => {
   let gateDetected = false
   try {
     const pos = await fetchApi('/api/pos/by-ip')
+    boothPeripherals.value = pos.booth_peripherals || {}
     if (pos.default_gate_id) {
       const gate = websiteStore.activeGateOuts.find((g) => g.id === pos.default_gate_id)
       if (gate) {

@@ -10,7 +10,7 @@ Group=parking
 SupplementaryGroups=dialout
 WorkingDirectory=/opt/parking-system-v2
 Environment=APP_ENV=production
-Environment=PATH=/opt/parking-system-v2/.venv/bin
+Environment=PATH=/opt/parking-system-v2/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=/opt/parking-system-v2/.env
 ExecStart=/opt/parking-system-v2/.venv/bin/python -m daemons.cli --gate-id %i
 Restart=always

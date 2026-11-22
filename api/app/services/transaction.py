@@ -25,6 +25,31 @@ from shared.logging import get_logger
 logger = get_logger("transaction_service")
 
 
+async def generate_ticket_barcode(db: AsyncSession, digits: int = 5) -> str:
+    """Short numeric ticket code (default 5 digits) that is free right now.
+
+    5 digits = 90k combinations; uniqueness is only enforced against ACTIVE
+    transactions (same partial index the DB uses), so codes recycle once the
+    ticket is paid. Collision retries make concurrent lanes safe.
+    """
+    import secrets
+
+    low = 10 ** (digits - 1)
+    span = 9 * low  # e.g. 10000..99999
+    for _ in range(40):
+        code = str(secrets.randbelow(span) + low)
+        taken = await db.execute(
+            select(ParkingTransaction.id).where(
+                ParkingTransaction.barcode == code,
+                ParkingTransaction.status == "ACTIVE",
+            )
+        )
+        if taken.first() is None:
+            return code
+    # Space exhausted (very busy site) — widen once rather than fail the entry.
+    return str(secrets.randbelow(900000) + 100000)
+
+
 async def create_entry_transaction(
     db: AsyncSession,
     *,
@@ -169,12 +194,31 @@ async def get_vehicle_type_tariff_config(
                 overnight_mode=vt.overnight_mode,
                 overnight_tariff=vt.overnight_tariff,
                 lost_ticket_penalty=vt.lost_ticket_penalty,
-                is_progressive=vt.is_progressive,
+                tariff_mode=vt.tariff_mode,
+                grace_period_minutes=vt.grace_period_minutes,
             )
         },
         grace_period_minutes=15,
     )
     return config, vt.code
+
+
+async def lane_vehicle_type_id(db: AsyncSession, gate_out_id: int | None) -> int | None:
+    """Vehicle type fixed by a single-type lane, or None for a mixed lane.
+
+    The exit gate's ``hardware_config`` carries ``lane_type`` and
+    ``default_vehicle_type_id``; a ticket has no type of its own until exit.
+    """
+    if gate_out_id is None:
+        return None
+    gate = await db.get(Gate, gate_out_id)
+    hw = (gate.hardware_config or {}) if gate else {}
+    if hw.get("lane_type") == "MIXED":
+        return None
+    try:
+        return int(hw["default_vehicle_type_id"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 async def calculate_transaction_fee(

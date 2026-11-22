@@ -12,7 +12,7 @@ import signal
 import uuid
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import redis.asyncio as aioredis
 
@@ -35,15 +35,26 @@ class BaseDaemon(ABC):
     - Graceful shutdown on SIGTERM/SIGINT
     """
 
-    def __init__(self, gate_id: str, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        gate_id: str,
+        config: dict[str, Any],
+        *,
+        config_loader: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
+    ) -> None:
         """Initialize daemon.
 
         Args:
             gate_id: Unique gate identifier (e.g., "gate-in-1")
             config: Gate configuration dict from database (host, port, mode, etc.)
+            config_loader: Optional async callable that reloads the gate config.
+                When provided, the daemon watches Redis for config-change events
+                and polls every 60s, so admin edits apply without a restart.
         """
         self.gate_id = gate_id
         self.config = config
+        self._config_loader = config_loader
+        self._reload_lock = asyncio.Lock()
         self.state: str = self.get_initial_state()
         self.state_data: dict[str, Any] = {}
         self._redis: aioredis.Redis | None = None
@@ -59,6 +70,18 @@ class BaseDaemon(ABC):
         # permanently failing command must not loop forever.
         self._redelivery_counts: dict[str, int] = {}
         self._max_redeliveries = 3
+
+    # Fields that require re-opening the controller link when they change.
+    _CONNECTION_FIELDS = (
+        "protocol",
+        "controller_host",
+        "controller_port",
+        "controller_device",
+        "controller_baudrate",
+    )
+
+    def _connection_signature(self) -> tuple:
+        return tuple(self.config.get(field) for field in self._CONNECTION_FIELDS)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -95,6 +118,11 @@ class BaseDaemon(ABC):
             asyncio.create_task(self._consume_commands(), name="consume"),
             asyncio.create_task(self._heartbeat(), name="heartbeat"),
         ])
+        if self._config_loader is not None:
+            self._tasks.extend([
+                asyncio.create_task(self._config_event_loop(), name="config_events"),
+                asyncio.create_task(self._config_poll_loop(), name="config_poll"),
+            ])
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
@@ -166,6 +194,84 @@ class BaseDaemon(ABC):
         (e.g., controller polling) that will be cancelled alongside base tasks.
         """
         pass
+
+    # ------------------------------------------------------------------
+    # Live config reload (gate edits apply without a restart)
+    # ------------------------------------------------------------------
+
+    async def _reload_config(self, reason: str) -> None:
+        if self._config_loader is None:
+            return
+        async with self._reload_lock:
+            try:
+                fresh = await self._config_loader()
+            except Exception as exc:
+                logger.warning(
+                    "gate_config_reload_failed", gate_id=self.gate_id, reason=reason, error=str(exc)
+                )
+                return
+            if not fresh:
+                logger.warning("gate_config_missing", gate_id=self.gate_id, reason=reason)
+                return
+
+            old_signature = self._connection_signature()
+            self.config = fresh
+            connection_changed = old_signature != self._connection_signature()
+            logger.info(
+                "gate_config_reloaded",
+                gate_id=self.gate_id,
+                reason=reason,
+                connection_changed=connection_changed,
+            )
+            try:
+                await self._on_config_reloaded(connection_changed)
+            except Exception as exc:
+                logger.error(
+                    "gate_config_reload_apply_failed",
+                    gate_id=self.gate_id,
+                    error=str(exc),
+                )
+
+    async def _on_config_reloaded(self, connection_changed: bool) -> None:  # noqa: B027
+        """Hook: apply a freshly loaded config.
+
+        Base implementation does nothing. Subclasses that own hardware must
+        override this (and reconnect when ``connection_changed`` is true).
+        """
+        pass
+
+    async def _config_event_loop(self) -> None:
+        """Reload immediately when the admin saves a gate."""
+        if self._redis is None:
+            return
+        pubsub = self._redis.pubsub()
+        channel = f"parking.config.gate.{self.gate_id}"
+        try:
+            await pubsub.subscribe(channel)
+            logger.info("config_watch_started", gate_id=self.gate_id, channel=channel)
+            while self._running:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=5.0
+                )
+                if message is None:
+                    continue
+                await self._reload_config("event")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("config_watch_error", gate_id=self.gate_id, error=str(exc))
+        finally:
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
+            except Exception:
+                pass
+
+    async def _config_poll_loop(self) -> None:
+        """Fallback: reconcile config every 60s even if the event was missed."""
+        while self._running:
+            await asyncio.sleep(60.0)
+            await self._reload_config("poll")
 
     def _controller_ok(self) -> bool:
         """Report controller link health for heartbeat/liveness.

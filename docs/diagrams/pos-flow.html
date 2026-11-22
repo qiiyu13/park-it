@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alur POS — E-Parking v2</title>
+<style>
+  :root{
+    --paper:#FAF9F6; --paper-2:#F2F0EB; --ink:#141414; --muted:#6E6A63;
+    --hair:#DAD5CC; --accent:#C2410C; --accent-soft:#F7E7DE; --good:#2F6B45;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1240px;margin:0 auto;padding:48px 40px 72px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;
+    border-bottom:1px solid var(--hair);padding-bottom:20px;margin-bottom:8px}
+  .kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+  h1{font-family:ui-serif,Georgia,"Times New Roman",serif;font-weight:500;
+    font-size:44px;line-height:1.05;letter-spacing:-.01em;margin:0}
+  h1 em{color:var(--accent);font-style:normal}
+  .lede{margin:10px 0 0;color:var(--muted);font-size:14px;max-width:56ch}
+  .meta{text-align:right;font-size:11px;line-height:1.7;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.12em;white-space:nowrap}
+  .meta b{color:var(--ink);font-weight:600}
+  figure{margin:32px 0 0}
+  svg{display:block;width:100%;height:auto}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:28px}
+  .card{border:1px solid var(--hair);border-radius:8px;padding:14px 16px;background:var(--paper)}
+  .card h3{margin:0 0 6px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .card p{margin:0;font-size:13px;line-height:1.5}
+  .card code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--accent)}
+  footer{margin-top:28px;border-top:1px solid var(--hair);padding-top:14px;
+    font-size:11px;color:var(--muted);display:flex;justify-content:space-between;gap:24px}
+  @media (max-width:900px){.cards{grid-template-columns:repeat(2,1fr)} h1{font-size:32px}}
+  @media print{body{background:#fff}.wrap{padding:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="kicker">E-Parking v2 · Alur operator</p>
+      <h1>Alur <em>POS</em> kasir</h1>
+      <p class="lede">Dari login sampai palang keluar terbuka: satu lane campuran (MIXED), bayar cash atau e-money, plus titik-titik gagal yang paling sering menghentikan kasir.</p>
+    </div>
+    <div class="meta">
+      <div>Versi <b>v2</b></div>
+      <div>Booth <b>BOOTH_01</b></div>
+      <div>Gate <b>GOUT-01</b></div>
+    </div>
+  </header>
+
+  <figure>
+  <svg viewBox="0 56 1180 1414" role="img" aria-labelledby="flowTitle flowDesc" xmlns="http://www.w3.org/2000/svg">
+    <title id="flowTitle">Alur POS kasir E-Parking v2</title>
+    <desc id="flowDesc">Empat fase: persiapan booth dan petugas, pencarian transaksi, pembayaran, dan pembukaan palang keluar, dengan cabang kegagalan di sisi kanan.</desc>
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#6E6A63"/>
+      </marker>
+      <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#C2410C"/>
+      </marker>
+      <style>
+        .band{fill:none;stroke:#DAD5CC;stroke-dasharray:3 4;stroke-width:1}
+        .bandLabel{font:600 10px ui-sans-serif,system-ui;letter-spacing:.16em;fill:#6E6A63;text-transform:uppercase}
+        .node{fill:#FAF9F6;stroke:#141414;stroke-width:1.2}
+        .node.soft{fill:#F2F0EB}
+        .node.accent{fill:#F7E7DE;stroke:#C2410C}
+        .node.bad{fill:#FAF9F6;stroke:#C2410C;stroke-dasharray:4 3}
+        .t{font:500 13px ui-sans-serif,system-ui;fill:#141414}
+        .t.small{font-size:11.5px}
+        .s{font:400 10.5px ui-monospace,"SF Mono",Menlo,monospace;fill:#6E6A63}
+        .lbl{font:500 10px ui-sans-serif,system-ui;fill:#6E6A63;letter-spacing:.06em}
+        .edge{fill:none;stroke:#6E6A63;stroke-width:1.2;marker-end:url(#ar)}
+        .edge.acc{stroke:#C2410C;marker-end:url(#arA)}
+        .dia{fill:#FAF9F6;stroke:#141414;stroke-width:1.2}
+        .dia.accent{fill:#F7E7DE;stroke:#C2410C}
+        .dt{font:500 12px ui-sans-serif,system-ui;fill:#141414}
+      </style>
+    </defs>
+
+    <!-- ══ FASE A ══ -->
+    <rect class="band" x="40" y="72" width="1100" height="300" rx="6"/>
+    <text class="bandLabel" x="56" y="96">01 · Persiapan booth &amp; petugas</text>
+
+    <rect class="node" x="150" y="112" width="300" height="58" rx="8"/>
+    <text class="t" x="166" y="136">Buka <tspan font-family="ui-monospace,monospace" font-size="12">/pos</tspan> — login cookie</text>
+    <text class="s" x="166" y="155">admin / operator</text>
+
+    <rect class="node" x="150" y="194" width="300" height="58" rx="8"/>
+    <text class="t" x="166" y="218">Deteksi booth dari IP klien</text>
+    <text class="s" x="166" y="237">GET /api/pos/detect-by-ip</text>
+
+    <path class="edge" d="M300 170 V194"/>
+
+    <rect class="node bad" x="770" y="194" width="290" height="58" rx="8"/>
+    <text class="t small" x="786" y="216">Booth tidak terdaftar / IP salah</text>
+    <text class="s" x="786" y="235">Perangkat → Booth POS → isi IP PC ini</text>
+    <path class="edge acc" d="M450 223 H770"/>
+
+    <path class="dia" d="M300 268 L440 322 L300 376 L160 322 Z"/>
+    <text class="dt" x="300" y="318" text-anchor="middle">Sesi petugas aktif?</text>
+    <text class="dt" x="300" y="336" text-anchor="middle" font-size="11">PIN + shift</text>
+    <path class="edge" d="M300 252 V268"/>
+
+    <rect class="node" x="150" y="404" width="300" height="66" rx="8"/>
+    <text class="t" x="166" y="428">Dialog check-in: pilih petugas,</text>
+    <text class="t" x="166" y="446">PIN 4 digit, penugasan shift</text>
+    <text class="s" x="166" y="462">POST /api/worker-sessions/check-in</text>
+    <path class="edge" d="M300 376 V404"/>
+    <text class="lbl" x="308" y="394">belum</text>
+
+    <rect class="node bad" x="770" y="404" width="290" height="66" rx="8"/>
+    <text class="t small" x="786" y="426">Ditolak: shift/penugasan kosong,</text>
+    <text class="t small" x="786" y="442">PIN salah, atau gate sudah ada petugas</text>
+    <text class="s" x="786" y="460">Jadwal Shift → Shift + Penugasan</text>
+    <path class="edge acc" d="M450 437 H770"/>
+
+    <path class="edge" d="M440 322 H520 V505"/>
+    <text class="lbl" x="446" y="314">sudah</text>
+
+    <!-- ══ FASE B ══ -->
+    <rect class="band" x="40" y="500" width="1100" height="300" rx="6"/>
+    <text class="bandLabel" x="56" y="524">02 · Cari transaksi</text>
+
+    <rect class="node accent" x="370" y="532" width="300" height="66" rx="8"/>
+    <text class="t" x="386" y="556">POS idle — scan barcode tiket</text>
+    <text class="t" x="386" y="574">atau ketik plat nomor</text>
+    <text class="s" x="386" y="590">marker: /payments/lookup</text>
+
+    <path class="dia" d="M520 630 L660 684 L520 738 L380 684 Z"/>
+    <text class="dt" x="520" y="680" text-anchor="middle">Transaksi aktif</text>
+    <text class="dt" x="520" y="698" text-anchor="middle">ditemukan?</text>
+    <path class="edge" d="M520 598 V630"/>
+
+    <rect class="node bad" x="770" y="655" width="290" height="58" rx="8"/>
+    <text class="t small" x="786" y="677">Tidak ditemukan / sudah dibayar</text>
+    <text class="s" x="786" y="696">toast peringatan, scan ulang</text>
+    <path class="edge acc" d="M660 684 H770"/>
+    <text class="lbl" x="672" y="676">tidak</text>
+
+    <rect class="node" x="370" y="762" width="300" height="66" rx="8"/>
+    <text class="t" x="386" y="786">Tampil plat, durasi, tarif</text>
+    <text class="t" x="386" y="804">Lane MIXED → pilih jenis kendaraan</text>
+    <text class="s" x="386" y="820">POST /payments/calculate-fee</text>
+    <path class="edge" d="M520 738 V762"/>
+    <text class="lbl" x="434" y="752">ya</text>
+
+    <!-- ══ FASE C ══ -->
+    <rect class="band" x="40" y="860" width="1100" height="320" rx="6"/>
+    <text class="bandLabel" x="56" y="884">03 · Pembayaran</text>
+
+    <path class="dia accent" d="M520 892 L650 940 L520 988 L390 940 Z"/>
+    <text class="dt" x="520" y="936" text-anchor="middle">Metode bayar</text>
+    <text class="dt" x="520" y="954" text-anchor="middle" font-size="11">F1 cash · F2 e-money</text>
+    <path class="edge" d="M520 828 V892"/>
+
+    <rect class="node" x="160" y="1014" width="280" height="66" rx="8"/>
+    <text class="t" x="176" y="1038">Cash: input nominal</text>
+    <text class="t" x="176" y="1056">kembalian dihitung</text>
+    <text class="s" x="176" y="1072">POST /payments/cash</text>
+    <path class="edge" d="M470 962 L300 962 V1014"/>
+
+    <rect class="node" x="600" y="1014" width="280" height="66" rx="8"/>
+    <text class="t" x="616" y="1038">E-money: tap kartu</text>
+    <text class="t" x="616" y="1056">deduct saldo → hasil</text>
+    <text class="s" x="616" y="1072">POST /payments/emoney/deduct</text>
+    <path class="edge" d="M570 962 L740 962 V1014"/>
+
+    <rect class="node bad" x="900" y="1014" width="220" height="66" rx="8"/>
+    <text class="t small" x="916" y="1036">Gagal / saldo kurang /</text>
+    <text class="t small" x="916" y="1052">LOST_CONTACT</text>
+    <text class="s" x="916" y="1070">retry atau alert kasir</text>
+    <path class="edge acc" d="M880 1047 H900"/>
+
+    <rect class="node" x="390" y="1112" width="300" height="58" rx="8"/>
+    <text class="t" x="406" y="1136">Transaksi ditutup</text>
+    <text class="s" x="406" y="1155">status = COMPLETED</text>
+    <path class="edge" d="M300 1080 V1090 H470 V1112"/>
+    <path class="edge" d="M740 1080 V1090 H590 V1112"/>
+
+    <!-- ══ FASE D ══ -->
+    <rect class="band" x="40" y="1196" width="1100" height="260" rx="6"/>
+    <text class="bandLabel" x="56" y="1220">04 · Palang keluar</text>
+
+    <rect class="node" x="390" y="1236" width="300" height="58" rx="8"/>
+    <text class="t" x="406" y="1260">Kirim perintah buka palang</text>
+    <text class="s" x="406" y="1279">gate daemon (in) / booth bridge (out)</text>
+    <path class="edge" d="M540 1170 V1236"/>
+
+    <rect class="node" x="390" y="1318" width="300" height="58" rx="8"/>
+    <text class="t" x="406" y="1342">Palang terbuka · struk dicetak</text>
+    <text class="s" x="406" y="1361">event vehicle_passed → IDLE</text>
+    <path class="edge" d="M540 1294 V1318"/>
+
+    <rect class="node bad" x="770" y="1318" width="290" height="58" rx="8"/>
+    <text class="t small" x="786" y="1340">Buka gagal (controller mati)</text>
+    <text class="s" x="786" y="1359">tombol buka manual + alert</text>
+    <path class="edge acc" d="M690 1347 H770"/>
+
+    <rect class="node soft" x="390" y="1400" width="300" height="46" rx="8"/>
+    <text class="t" x="406" y="1429">Kembali ke POS idle</text>
+    <path class="edge" d="M540 1376 V1400"/>
+
+    <!-- loop back -->
+    <path class="edge" d="M390 1423 H24 V565 H370" stroke-dasharray="4 4"/>
+    <text class="lbl" x="34" y="1010" transform="rotate(-90 34 1010)">transaksi berikutnya</text>
+  </svg>
+  </figure>
+
+  <div class="cards">
+    <div class="card"><h3>Prasyarat</h3><p>Master shift, personil + PIN, penugasan hari ini, booth dengan IP, gate dengan controller.</p></div>
+    <div class="card"><h3>Input kasir</h3><p>Barcode tiket 5 digit, plat nomor, atau tap kartu member. Semua lewat <code>/payments/lookup</code>.</p></div>
+    <div class="card"><h3>Pembayaran</h3><p>Cash (<code>F1</code>) atau e-money (<code>F2</code>); lane MIXED menentukan tarif motor/mobil.</p></div>
+    <div class="card"><h3>Keluaran</h3><p>Transaksi <code>COMPLETED</code> → perintah buka palang → struk → lane kembali idle.</p></div>
+  </div>
+
+  <footer>
+    <span>E-Parking v2 — dokumen alur internal</span>
+    <span>Lane MIXED · barcode 5 digit · sesi petugas berbasis PIN</span>
+  </footer>
+</div>
+</body>
+</html>

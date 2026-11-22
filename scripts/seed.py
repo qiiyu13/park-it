@@ -78,7 +78,7 @@ async def seed() -> None:
             lost_ticket_penalty=20000,
             overnight_mode="midnight",
             overnight_tariff=15000,
-            is_progressive=False,
+            tariff_mode="hourly",
         )
         mobil = VehicleType(
             name="Mobil",
@@ -89,22 +89,11 @@ async def seed() -> None:
             lost_ticket_penalty=50000,
             overnight_mode="midnight",
             overnight_tariff=30000,
-            is_progressive=False,
+            tariff_mode="hourly",
         )
-        bus = VehicleType(
-            name="Bus",
-            code="BUS",
-            base_tariff=10000,
-            hourly_rate=5000,
-            max_daily_cap=60000,
-            lost_ticket_penalty=100000,
-            overnight_mode="midnight",
-            overnight_tariff=60000,
-            is_progressive=False,
-        )
-        session.add_all([motor, mobil, bus])
+        session.add_all([motor, mobil])
         await session.flush()
-        print("  Created vehicle types: Motor, Mobil, Bus")
+        print("  Created vehicle types: Motor, Mobil")
 
         # Area parkir
         area = AreaParkir(
