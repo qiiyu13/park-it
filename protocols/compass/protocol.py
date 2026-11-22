@@ -5,7 +5,9 @@ Commands are wrapped with \xa6 prefix and \xa9 suffix.
 """
 
 import asyncio
+import select
 import socket
+import struct
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -138,6 +140,9 @@ def cmd_qr5(frame: bytes) -> bytes:
 class CompassTransport:
     """TCP transport for Compass gate controller."""
 
+    SEND_TIMEOUT_S = 3.0
+    last_error: str | None = None  # why the link was last torn down (for logs)
+
     def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
@@ -149,6 +154,10 @@ class CompassTransport:
         self._sock.settimeout(timeout)
         self._sock.connect((self.host, self.port))
         self._enable_keepalive(self._sock)
+        # Fixed write budget. recv_async waits with select() instead of
+        # settimeout(), so a 0.5s read poll no longer shrinks the send timeout —
+        # that turned one slow ACK into a teardown and a multi-hour lockout.
+        self._sock.settimeout(self.SEND_TIMEOUT_S)
 
     @staticmethod
     def _enable_keepalive(sock: socket.socket) -> None:
@@ -165,13 +174,31 @@ class CompassTransport:
                     pass
 
     def close(self) -> None:
-        """Close TCP connection."""
+        """Close TCP connection gracefully (FIN; queued bytes still flushed)."""
         if self._sock:
             self._sock.close()
             self._sock = None
 
+    def abort(self) -> None:
+        """Close with RST (SO_LINGER 0) for long-lived daemon links.
+
+        PCLess/Compass controllers accept a single TCP client. A graceful FIN on
+        a stalled link can leave the controller holding the old session, so it
+        answers ping but refuses every new connect (ECONNREFUSED) for hours.
+        RST makes it drop the session at once. Not for send-then-close callers:
+        RST discards unsent bytes (e.g. a ticket still in the send buffer).
+        """
+        if self._sock:
+            try:
+                self._sock.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                )
+            except OSError:
+                pass
+            self.close()
+
     def send(self, command: bytes) -> None:
-        """Send command to controller."""
+        """Send command to controller (blocks up to SEND_TIMEOUT_S)."""
         if self._sock is None:
             raise RuntimeError("Not connected")
         self._sock.sendall(command)
@@ -199,22 +226,30 @@ class CompassTransport:
         this the caller cannot distinguish "idle" from "dead" and would busy-spin
         on a half-open socket forever instead of reconnecting.
         """
-        if self._sock is None:
+        sock = self._sock
+        if sock is None:
             return b""
-        self._sock.settimeout(timeout)
         loop = asyncio.get_event_loop()
         try:
-            data = await loop.run_in_executor(None, self._sock.recv, 1024)
-        except TimeoutError:
+            data = await loop.run_in_executor(None, self._recv_ready, sock, timeout)
+        except (OSError, ValueError) as e:
+            self.last_error = str(e)
+            self.abort()
             return b""
-        except OSError:
-            self.close()
-            return b""
+        if data is None:
+            return b""  # idle: no data within timeout
         if not data:
-            # Orderly peer shutdown (FIN) — 0 bytes on a blocking recv means EOF,
-            # not a timeout. Tear down so the listener reconnects.
-            self.close()
+            # Orderly peer shutdown (FIN) — 0 bytes after select() said readable
+            # means EOF. Tear down so the listener reconnects.
+            self.last_error = "peer closed connection"
+            self.abort()
         return data
+
+    @staticmethod
+    def _recv_ready(sock: socket.socket, timeout: float) -> bytes | None:
+        """select() then recv — None on timeout. Leaves the socket timeout alone."""
+        readable, _, _ = select.select([sock], [], [], timeout)
+        return sock.recv(1024) if readable else None
 
     def is_connected(self) -> bool:
         """Check if socket is connected."""
@@ -255,6 +290,9 @@ class SerialTransport:
         if self._ser and self._ser.is_open:
             self._ser.close()
         self._ser = None
+
+    abort = close  # ponytail: no session state on serial, same as close
+    last_error: str | None = None
 
     def send(self, command: bytes) -> None:
         if self._ser is None or not self._ser.is_open:

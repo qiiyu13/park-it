@@ -165,7 +165,9 @@ class GateInDaemon(BaseDaemon):
 
     async def _disconnect_controller(self) -> None:
         if self.controller:
-            self.controller.close()
+            # RST, not FIN: frees the single-client controller's slot at once
+            # (see CompassTransport.abort). Covers stop(), reconnect, config edit.
+            self.controller.abort()
             self.controller = None
             logger.info("controller_disconnected", gate_id=self.gate_id)
 
@@ -273,10 +275,12 @@ class GateInDaemon(BaseDaemon):
                 logger.debug("controller_heartbeat_error", gate_id=self.gate_id, error=str(e))
 
     async def _setup_rss(self) -> None:
-        if self.controller and self.controller.is_connected():
-            async with self._controller_lock:
-                self.controller.send(cmd_rss(interval_100ms=2))
-            logger.info("rss_configured", gate_id=self.gate_id)
+        async with self._controller_lock:
+            controller = self.controller
+            if not (controller and controller.is_connected()):
+                return
+            controller.send(cmd_rss(interval_100ms=2))
+        logger.info("rss_configured", gate_id=self.gate_id)
 
     async def _rss_listener(self) -> None:
         await self._setup_rss()
@@ -299,6 +303,7 @@ class GateInDaemon(BaseDaemon):
                         "rss_controller_down_reconnecting",
                         gate_id=self.gate_id,
                         next_retry_s=reconnect_delay,
+                        reason=getattr(self.controller, "last_error", None),
                     )
                     await self._disconnect_controller()
                     await self._connect_controller()
@@ -889,7 +894,8 @@ class GateInDaemon(BaseDaemon):
         dropped (controller down or circuit breaker open). Best-effort callers
         ignore the result; the critical gate-open path uses it to retry/NACK.
         """
-        if not (self.controller and self.controller.is_connected()):
+        controller = self.controller
+        if not (controller and controller.is_connected()):
             return False
 
         # Circuit breaker open? Fast-fail without grabbing the lock.
@@ -904,14 +910,21 @@ class GateInDaemon(BaseDaemon):
             return False
 
         try:
+            # Executor: a stalled controller may hold sendall for SEND_TIMEOUT_S;
+            # that must not freeze RSS, heartbeat and the Redis consumer.
             async with self._controller_lock:
-                self.controller.send(command)
+                await loop.run_in_executor(None, controller.send, command)
             logger.debug("controller_cmd_sent", gate_id=self.gate_id, cmd=command.hex())
             if self._cb_fail_count:
                 logger.info("controller_cb_reset", gate_id=self.gate_id)
             self._cb_fail_count = 0
             return True
         except Exception as e:
+            if self.controller is not controller:
+                # Link was swapped while this send waited (RSS listener already
+                # reconnected). Never abort or penalise the fresh link.
+                logger.debug("controller_cmd_stale_link", gate_id=self.gate_id, error=str(e))
+                return False
             self._cb_fail_count += 1
             logger.error(
                 "controller_cmd_error",
@@ -923,8 +936,8 @@ class GateInDaemon(BaseDaemon):
             # never see EOF if no data is pending, so the listener would keep the
             # half-open socket. Tear it down here so is_connected() flips False and
             # the RSS listener reconnects within one poll cycle.
-            if self.controller:
-                self.controller.close()
+            controller.last_error = f"send failed: {e}"
+            controller.abort()
             if self._cb_fail_count >= self._cb_threshold:
                 self._cb_open_until = now + self._cb_cooldown_s
                 logger.warning(
