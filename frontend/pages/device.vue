@@ -700,6 +700,11 @@ const posColumns = [
   } },
   { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },
 ]
+const plateModeOptions = [
+  { label: 'Tampil dengan awalan', value: 'prefix' },
+  { label: 'Tampil tanpa awalan', value: 'plain' },
+  { label: 'Sembunyikan', value: 'hidden' },
+]
 const posFields = computed(() => [
   { prop: 'name', label: 'Nama', type: 'text', required: true },
   { prop: 'code', label: 'Kode', type: 'text', required: true },
@@ -707,7 +712,7 @@ const posFields = computed(() => [
   { prop: 'default_gate_id', label: 'Gate Default', type: 'select', options: gateOutOptions.value },
   { prop: '_camera_id', label: 'Kamera (perangkat)', type: 'select', options: cameraOptions.value },
   { prop: '_printer_id', label: 'Printer (perangkat)', type: 'select', options: printerOptions.value },
-  { prop: '_show_plate', label: 'Tampilkan isian plat nomor di POS', type: 'boolean', helper: 'Hilangkan centang bila kasir tidak memakai plat nomor sama sekali.' },
+  { prop: '_plate_mode', label: 'Isian plat nomor di POS', type: 'select', options: plateModeOptions, helper: 'Awalan diambil dari Pengaturan (Awalan plat nomor di POS keluar). Pilih Sembunyikan bila kasir tidak memakai plat nomor.' },
   { prop: 'is_active', label: 'Aktif', type: 'boolean' },
 ])
 function openPosModal(row = null) {
@@ -718,9 +723,9 @@ function openPosModal(row = null) {
         ...row,
         _camera_id: (periph.camera_ids && periph.camera_ids[0]) || null,
         _printer_id: periph.printer_id ?? null,
-        _show_plate: periph.ui?.show_plate !== false,
+        _plate_mode: periph.ui?.plate_mode || (periph.ui?.show_plate === false ? 'hidden' : 'prefix'),
       }
-    : { is_active: true, ip_address: '' }
+    : { is_active: true, ip_address: '', _plate_mode: 'prefix' }
   posModalVisible.value = true
 }
 async function savePos(data) {
@@ -731,11 +736,12 @@ async function savePos(data) {
       ...(data.booth_peripherals || {}),
       camera_ids: data._camera_id ? [Number(data._camera_id)] : [],
       printer_id: data._printer_id ? Number(data._printer_id) : null,
-      ui: { ...(data.booth_peripherals?.ui || {}), show_plate: data._show_plate !== false },
+      ui: { ...(data.booth_peripherals?.ui || {}), plate_mode: data._plate_mode || 'prefix' },
     }
     delete payload._camera_id
     delete payload._printer_id
-    delete payload._show_plate
+    delete payload._plate_mode
+    delete payload.booth_peripherals.ui.show_plate
     delete payload.booth_peripherals_patch
     if (posEditing.value) await posCrud.update(data.id, payload); else await posCrud.create(payload)
     posModalVisible.value = false

@@ -518,14 +518,21 @@ const entrySnapshotUrl = computed(() => {
   return tx?.entry_snapshot_id ? `/api/snapshots/${tx.entry_snapshot_id}/image` : null
 })
 
+// Per-booth plate field: 'prefix' (show, prefilled with the global city code),
+// 'plain' (show, empty) or 'hidden'. Older booths only have ui.show_plate.
+const plateMode = computed(() => {
+  const ui = boothPeripherals.value?.ui || {}
+  return ui.plate_mode || (ui.show_plate === false ? 'hidden' : 'prefix')
+})
+
 // Global city code prefix (server setting pos_plate_prefix, e.g. "H").
 const platePrefix = computed(() => {
+  if (plateMode.value !== 'prefix') return ''
   const raw = websiteStore.getSetting('pos_plate_prefix', '')
   return String(raw || '').trim().toUpperCase()
 })
 
-// Per-booth switch: hide the plate label + input entirely on this POS.
-const showPlate = computed(() => boothPeripherals.value?.ui?.show_plate !== false)
+const showPlate = computed(() => plateMode.value !== 'hidden')
 
 const emoneyEnabled = computed(() => {
   const raw = websiteStore.getSetting('emoney_enabled', 'true')
