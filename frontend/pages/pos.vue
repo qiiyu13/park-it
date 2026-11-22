@@ -6,6 +6,7 @@
           class="flex-1 min-w-0"
           :booth-connected="gateStore.boothConnected"
           :hardware-status="hardwareStatus"
+          :down-entry-gates="downEntryGates"
         />
         <div class="h-5 w-px bg-border shrink-0" />
         <PosWorkerBadge
@@ -198,6 +199,33 @@ const config = useRuntimeConfig()
 const { fetchApi } = useApi()
 const sound = useSound()
 const { hardwareStatus, updateFromGate, updateWebSocketStatus, updateBoothHardware, resetBoothHardware, startPolling, stopPolling } = useHardwareStatus()
+
+// Entry gates whose daemon or controller stayed down for 2 polls in a row
+// (~1 min), so a PCLess lockout reaches the operator instead of only the logs.
+const downEntryGates = ref([])
+let entryGateMisses = {}
+let entryGateTimer = null
+async function pollEntryGates() {
+  try {
+    const res = await fetchApi('/api/gates/status/heartbeat')
+    const next = {}
+    for (const g of res?.gates || []) {
+      if (g.direction !== 'IN' || (g.online && g.controller_ok !== false)) continue
+      next[g.code] = (entryGateMisses[g.code] || 0) + 1
+    }
+    entryGateMisses = next
+    downEntryGates.value = Object.keys(next).filter((code) => next[code] >= 2)
+  } catch {
+    // advisory only — keep the last known value
+  }
+}
+onMounted(() => {
+  pollEntryGates()
+  entryGateTimer = setInterval(pollEntryGates, 30_000)
+})
+onBeforeUnmount(() => {
+  if (entryGateTimer) clearInterval(entryGateTimer)
+})
 const { detectCardType, maskCardNumber } = useFormatters()
 
 // Selected exit lane — declared before any watched computed so the initial

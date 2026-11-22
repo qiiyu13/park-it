@@ -700,7 +700,12 @@ async def print_ticket(
                 additional_info=additional_info,
             )
         elif mode == "CONTROLLER_PASSTHROUGH":
-            _print_via_controller(escpos_data, print_config)
+            # The entry gate daemon owns this single-client controller and prints
+            # passthrough tickets itself (PR3). A second socket from here would be
+            # refused or steal its slot. Fail into retry/alert, never connect.
+            raise RuntimeError(
+                "entry controller is owned by the gate daemon; worker will not open it"
+            )
         elif mode == "SERIAL":
             _print_via_serial(escpos_data, print_config)
         else:

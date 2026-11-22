@@ -12,6 +12,7 @@ infra on every site and were configured with an empty alertmanager target
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from shared.logging import get_logger
@@ -46,6 +47,7 @@ async def check_gate_heartbeats(ctx) -> dict:
             ).all()
 
         offline = []
+        controller_down = []
         for code, name, direction in gates:
             last = await redis.get(f"gate:heartbeat:{code}")
             if last is None:
@@ -53,9 +55,23 @@ async def check_gate_heartbeats(ctx) -> dict:
                 await redis.expire(f"alert:hb_miss:{code}", 3600)
                 if misses >= MIN_MISSES:
                     offline.append((code, name, direction))
+                continue
+            # Beat is fresh — reset the miss counter.
+            await redis.delete(f"alert:hb_miss:{code}")
+
+            # Daemon alive but its controller unreachable/hung (e.g. a PCLess
+            # that answers ping but refuses TCP). Software cannot clear that.
+            try:
+                ok = json.loads(last).get("controller_ok", True)
+            except (ValueError, AttributeError):
+                ok = True
+            if ok is False:
+                misses = await redis.incr(f"alert:ctrl_miss:{code}")
+                await redis.expire(f"alert:ctrl_miss:{code}", 3600)
+                if misses >= MIN_MISSES:
+                    controller_down.append((code, name))
             else:
-                # Beat is fresh — reset the miss counter.
-                await redis.delete(f"alert:hb_miss:{code}")
+                await redis.delete(f"alert:ctrl_miss:{code}")
 
         # A gate that just came up for the first time also has no key; the
         # consecutive-miss counter means it must be absent for MIN_MISSES
@@ -74,9 +90,29 @@ async def check_gate_heartbeats(ctx) -> dict:
                 ),
             )
 
+        for code, name in controller_down:
+            await enqueue_alert(
+                ctx,
+                key=f"controller_down:{code}",
+                message=(
+                    f"<b>Controller gate tidak merespon</b>\n\n"
+                    f"Gate: <code>{code}</code> ({name})\n"
+                    f"Terdeteksi: {datetime.now(UTC).isoformat(timespec='seconds')}\n\n"
+                    f"Daemon jalan, tapi controller tidak bisa dihubungi. "
+                    f"Matikan lalu nyalakan lagi controller {code}, cek kabel LAN."
+                ),
+            )
+
         if offline:
             logger.warning("gate_heartbeats_offline", gates=[c for c, _, _ in offline])
-        return {"status": "success", "offline": len(offline), "total": len(gates)}
+        if controller_down:
+            logger.warning("gate_controllers_down", gates=[c for c, _ in controller_down])
+        return {
+            "status": "success",
+            "offline": len(offline),
+            "controller_down": len(controller_down),
+            "total": len(gates),
+        }
     except Exception as e:
         logger.error("gate_heartbeat_check_failed", error=str(e))
         return {"status": "error", "message": str(e)}

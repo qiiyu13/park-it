@@ -1,6 +1,6 @@
 """gate_in controller link: a failed send must not kill a reconnected link."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from daemons.gate_in import GateInDaemon
 
@@ -40,3 +40,42 @@ async def test_send_failure_aborts_dead_link_with_reason():
     link.abort.assert_called_once()
     assert link.last_error == "send failed: timed out"
     assert daemon._cb_fail_count == 1
+
+
+async def test_silent_controller_is_reset_and_reported_down(monkeypatch):
+    import time
+
+    from protocols.compass.protocol import CompassTransport
+
+    daemon = _daemon()
+    link = MagicMock(spec=CompassTransport)
+    link.is_connected.return_value = True
+    link.recv_async = AsyncMock(return_value=b"")
+    daemon.controller = link
+    daemon._running = True
+    daemon._setup_rss = AsyncMock()
+    daemon._last_rx = time.monotonic() - 31
+
+    assert daemon._controller_ok() is False  # TCP up, but no reply: not healthy
+
+    def stop_loop() -> None:
+        daemon._running = False
+
+    link.abort.side_effect = stop_loop
+    await daemon._rss_listener()
+
+    link.abort.assert_called_once()
+    assert link.last_error == "no data for 30s"
+
+
+async def test_replying_controller_is_kept():
+    import time
+
+    from protocols.compass.protocol import CompassTransport
+
+    daemon = _daemon()
+    link = MagicMock(spec=CompassTransport)
+    link.is_connected.return_value = True
+    daemon.controller = link
+    daemon._last_rx = time.monotonic()
+    assert daemon._controller_ok() is True

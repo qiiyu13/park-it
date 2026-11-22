@@ -41,6 +41,12 @@ from shared.logging import get_logger
 
 logger = get_logger(__name__)
 
+# The daemon sends STAT every 5s and the controller answers within ~1ms
+# (measured on site), so 30s of silence on an "open" TCP link means a hung
+# controller or a half-open socket. ponytail: fixed value, make it a gate
+# setting only if some firmware turns out to be slower.
+CONTROLLER_SILENCE_S = 30.0
+
 # State constants
 STATE_IDLE = "IDLE"
 STATE_WAITING_INPUT = "WAITING_INPUT"
@@ -102,6 +108,7 @@ class GateInDaemon(BaseDaemon):
         self._cb_threshold = 3
         self._cb_cooldown_s = 15.0
         self._cb_open_until = 0.0
+        self._last_rx = 0.0  # monotonic time of the last byte from the controller
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -132,7 +139,13 @@ class GateInDaemon(BaseDaemon):
         Lets monitoring distinguish "daemon alive but gate hardware unreachable"
         from a fully healthy gate.
         """
-        return bool(self.controller and self.controller.is_connected())
+        controller = self.controller
+        if not (controller and controller.is_connected()):
+            return False
+        # A hung controller can keep TCP up; only a recent reply counts as healthy.
+        if isinstance(controller, CompassTransport):
+            return time.monotonic() - self._last_rx <= CONTROLLER_SILENCE_S
+        return True
 
     # ------------------------------------------------------------------
     # Controller connection
@@ -149,6 +162,7 @@ class GateInDaemon(BaseDaemon):
                     return
                 self.controller = SerialTransport(device, baudrate)
                 self.controller.connect(timeout=5.0)
+                self._last_rx = time.monotonic()
                 logger.info("controller_connected", gate_id=self.gate_id, device=device, baudrate=baudrate)
             else:
                 host = self.config.get("controller_host")
@@ -158,6 +172,7 @@ class GateInDaemon(BaseDaemon):
                     return
                 self.controller = CompassTransport(host, port)
                 self.controller.connect(timeout=5.0)
+                self._last_rx = time.monotonic()
                 logger.info("controller_connected", gate_id=self.gate_id, host=host, port=port)
         except Exception as e:
             logger.error("controller_connect_failed", gate_id=self.gate_id, error=str(e))
@@ -290,10 +305,27 @@ class GateInDaemon(BaseDaemon):
             try:
                 if self.controller and self.controller.is_connected():
                     reconnect_delay = 1.0
-                    chunk = await self.controller.recv_async(timeout=0.5)
+                    controller = self.controller
+                    chunk = await controller.recv_async(timeout=0.5)
                     if chunk:
+                        self._last_rx = time.monotonic()
                         buffer += chunk
                         buffer = await self._process_rss_buffer(buffer)
+                    elif (
+                        isinstance(controller, CompassTransport)
+                        and controller.is_connected()
+                        and time.monotonic() - self._last_rx > CONTROLLER_SILENCE_S
+                    ):
+                        # STAT gets an answer within ~1ms; this much silence means
+                        # the controller hung behind a live TCP socket. RST it and
+                        # let the branch below reconnect.
+                        controller.last_error = f"no data for {CONTROLLER_SILENCE_S:.0f}s"
+                        logger.warning(
+                            "controller_silent_reconnecting",
+                            gate_id=self.gate_id,
+                            silent_s=round(time.monotonic() - self._last_rx, 1),
+                        )
+                        controller.abort()
                 else:
                     # Controller down — attempt reconnect with capped backoff
                     # instead of spinning forever on a dead socket. Without this
@@ -709,7 +741,31 @@ class GateInDaemon(BaseDaemon):
     async def _cmd_display_text(self, line1: str, line2: str) -> None:
         await self._display(line1, line2)
 
-    async def _cmd_print_ticket(self, barcode: str, gate_name: str) -> None:
+    def _worker_print_config(self, mode: str) -> dict[str, Any]:
+        """Printer transport for the print worker, as this daemon resolved it.
+
+        Passed with the job so the worker never re-probes and falls back to
+        CONTROLLER_PASSTHROUGH — that would open a second socket to this gate's
+        single-client controller, which the daemon already owns.
+        """
+        p = self.config.get("printer") or {}
+        if mode == "NETWORK":
+            return {
+                "mode": "NETWORK",
+                "printer_ip_address": p.get("ip_address"),
+                "printer_port": p.get("port") or 9100,
+            }
+        if mode == "SERIAL":
+            return {
+                "mode": "SERIAL",
+                "printer_device": p.get("serial_device"),
+                "baudrate": p.get("baudrate") or 9600,
+            }
+        return {"mode": "USB", "printer_device": p.get("serial_device")}
+
+    async def _cmd_print_ticket(
+        self, barcode: str, gate_name: str, print_config: dict[str, Any] | None = None
+    ) -> None:
         if not self.has_ticket_printer:
             logger.info("print_ticket_skipped_disabled", gate_id=self.gate_id, barcode=barcode)
             return
@@ -722,6 +778,7 @@ class GateInDaemon(BaseDaemon):
                 gate_id=self.gate_id,
                 barcode=barcode,
                 gate_name=gate_name,
+                print_config=print_config,
                 _job_id=f"print_ticket:{barcode}",
             )
         except Exception as e:
@@ -775,7 +832,9 @@ class GateInDaemon(BaseDaemon):
                 # The physical printer is not behind the controller. Only the
                 # print worker knows how to talk to it (python-escpos / serial),
                 # so hand the job over instead of sending PR3 into the PCLess.
-                await self._cmd_print_ticket(barcode, gate_name)
+                await self._cmd_print_ticket(
+                    barcode, gate_name, self._worker_print_config(printer_mode)
+                )
                 await asyncio.sleep(2.0)
                 print_success = True
                 logger.info(

@@ -17,6 +17,16 @@
         />
         <span class="text-sm font-medium text-sidebar-foreground">{{ item.label }}</span>
       </div>
+      <div
+        v-for="code in downEntryGates"
+        :key="code"
+        class="flex items-center gap-2"
+        role="status"
+        :title="`Gate masuk ${code}: controller tidak merespon. Matikan lalu nyalakan controller ${code}; bila tetap, hubungi teknisi.`"
+      >
+        <span class="h-2 w-2 rounded-full bg-destructive animate-pulse" />
+        <span class="text-sm font-medium text-sidebar-foreground">{{ code }} tidak terhubung</span>
+      </div>
     </div>
 
     <!-- Right: Clock -->
@@ -33,6 +43,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 const props = defineProps({
   boothConnected: { type: Boolean, default: false },
   hardwareStatus: { type: Object, default: () => ({}) },
+  downEntryGates: { type: Array, default: () => [] },
 })
 
 const clock = ref('')
