@@ -147,6 +147,14 @@ class BaseDaemon(ABC):
                     error=str(result),
                 )
 
+        # Release hardware before the process exits. Without this a systemd
+        # restart closes sockets implicitly (FIN), which a single-client
+        # controller may hold on to and then refuse the restarted daemon.
+        try:
+            await self._on_shutdown()
+        except Exception as e:
+            logger.error("daemon_shutdown_hook_error", gate_id=self.gate_id, error=str(e))
+
         if self._redis:
             await self._redis.aclose()
             self._redis = None
@@ -186,6 +194,10 @@ class BaseDaemon(ABC):
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
+
+    async def _on_shutdown(self) -> None:  # noqa: B027 — optional override hook, not abstract
+        """Hook called on SIGTERM/SIGINT after tasks are cancelled, before exit."""
+        pass
 
     async def _on_started(self) -> None:  # noqa: B027 — optional override hook, not abstract
         """Hook called after _running is set to True but before main tasks start.

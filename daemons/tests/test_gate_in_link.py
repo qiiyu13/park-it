@@ -79,3 +79,33 @@ async def test_replying_controller_is_kept():
     daemon.controller = link
     daemon._last_rx = time.monotonic()
     assert daemon._controller_ok() is True
+
+
+async def test_sigterm_shutdown_resets_controller_link(monkeypatch):
+    """systemd restart (SIGTERM) must RST the link, not leave it to process exit."""
+    import asyncio
+
+    import daemons.base as base
+
+    daemon = _daemon()
+    link = MagicMock()
+    daemon.controller = link
+
+    async def idle() -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(base.aioredis, "from_url", lambda *a, **k: MagicMock(aclose=AsyncMock()))
+    daemon._connect_controller = AsyncMock()  # keep the fake link in place
+    daemon._wait_for_redis_then_init = AsyncMock()
+    daemon._on_started = AsyncMock()
+    daemon._consume_commands = idle
+    daemon._heartbeat = idle
+    daemon._config_loader = None
+
+    task = asyncio.create_task(daemon.run())
+    await asyncio.sleep(0.05)
+    daemon._request_shutdown()  # what the SIGTERM handler calls
+    await asyncio.wait_for(task, timeout=2)
+
+    link.abort.assert_called_once()
+    assert daemon.controller is None

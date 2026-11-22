@@ -130,6 +130,10 @@ class GateInDaemon(BaseDaemon):
             self._poll_task.cancel()
         await self._disconnect_controller()
 
+    async def _on_shutdown(self) -> None:
+        # systemd restart/stop path: RST the controller link (see abort()).
+        await self._disconnect_controller()
+
     def get_initial_state(self) -> str:
         return STATE_IDLE
 
