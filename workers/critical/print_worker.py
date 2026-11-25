@@ -131,9 +131,9 @@ async def _check_paper_available(gate_id: str) -> tuple[bool, int | None]:
                 select(Printer).where(
                     Printer.gate_id == gate_id,
                     Printer.is_active == True,  # noqa: E712
-                )
+                ).order_by(Printer.id)
             )
-            printer = result.scalar_one_or_none()
+            printer = result.scalars().first()
             if printer is None:
                 logger.warning("no_printer_found", gate_id=gate_id)
                 return True, None  # No printer record = no tracking
@@ -527,9 +527,10 @@ async def _get_print_config(gate_id: str, gate_type: str = "OUT") -> dict[str, A
                     Printer.gate_id == gate_id,
                     Printer.gate_type == gate_type,
                     Printer.is_active == True,  # noqa: E712
-                )
+                ).order_by(Printer.id)
             )
-            printer = printer_result.scalar_one_or_none()
+            # A gate may have several printers; the oldest wins, as in daemons/cli.py.
+            printer = printer_result.scalars().first()
 
             gate_result = await db.execute(select(Gate).where(Gate.code == gate_id))
             gate = gate_result.scalar_one_or_none()

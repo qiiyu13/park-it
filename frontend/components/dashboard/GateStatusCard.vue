@@ -54,6 +54,7 @@ const props = defineProps({
   gate: { type: Object, required: true },
   testing: { type: Boolean, default: false },
   booths: { type: Array, default: () => [] },
+  cameraStatus: { type: Object, default: () => ({}) },
 })
 
 defineEmits(['test', 'edit', 'open', 'logs', 'enable-daemon'])
@@ -93,13 +94,19 @@ const peripherals = computed(() => {
   }
   if (hc.rfid?.enabled) rows.push({ key: 'rfid', label: 'RFID', status: 'idle', detail: '' })
   const camCount = (hc.cameras && hc.cameras.length) || (hc.camera?.url ? 1 : 0)
+  // Only registered cameras (camera_ids) are probed; legacy inline URLs are not.
+  const camIds = hc.camera_ids || []
+  const camDown = camIds.filter((id) => props.cameraStatus[id] === false).length
   if (hc.camera?.enabled || camCount) {
-    rows.push({
-      key: 'camera',
-      label: 'Kamera',
-      status: camCount ? 'online' : 'idle',
-      detail: camCount ? `${camCount} kamera` : 'no url',
-    })
+    let status = camCount ? 'online' : 'idle'
+    let detail = camCount ? `${camCount} kamera` : 'no url'
+    if (camDown) {
+      status = 'offline'
+      detail = camDown < camCount ? `${camDown} dari ${camCount} tidak terhubung` : 'tidak terhubung'
+    } else if (camIds.length && camIds.every((id) => props.cameraStatus[id] === undefined)) {
+      status = 'idle'
+    }
+    rows.push({ key: 'camera', label: 'Kamera', status, detail })
   }
 
   const barrier = barrierStatus.value

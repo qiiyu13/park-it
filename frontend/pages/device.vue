@@ -20,6 +20,7 @@
           :gate="gate"
           :testing="testingGateId === gate.id"
           :booths="posList"
+          :camera-status="cameraStatus"
           @edit="openGateModal(gate)"
           @test="testGate(gate)"
           @logs="openGateLog(gate)"
@@ -37,7 +38,7 @@
               <span class="truncate font-medium text-foreground">{{ c.name }}</span>
               <div class="flex shrink-0 items-center gap-2">
                 <span class="max-w-40 truncate text-xs text-muted-foreground">{{ c.rtsp_url }}</span>
-                <StatusPill :status="c.is_active ? 'online' : 'idle'" :label="c.is_active ? 'Aktif' : 'Nonaktif'" />
+                <StatusPill v-bind="cameraPill(c)" />
               </div>
             </div>
           </div>
@@ -48,7 +49,6 @@
             <div v-for="p in printers" :key="p.id" class="flex items-center justify-between gap-2 text-sm">
               <span class="truncate font-medium text-foreground">{{ p.name }}</span>
               <div class="flex shrink-0 items-center gap-2">
-                <span v-if="p.paper_remaining != null" class="text-xs text-muted-foreground">kertas {{ p.paper_remaining }}</span>
                 <StatusPill :status="p.is_active ? 'online' : 'idle'" :label="p.is_active ? 'Aktif' : 'Nonaktif'" />
               </div>
             </div>
@@ -774,10 +774,20 @@ const cameraFields = [
   { prop: 'is_active', label: 'Aktif', type: 'boolean' },
 ]
 function openCameraModal(row = null) { cameraEditing.value = !!row; cameraForm.value = row ? { ...row } : { type: 'rtsp', is_active: true }; cameraModalVisible.value = true }
-async function saveCamera(data) { submitting.value = true; try { if (cameraEditing.value) await cameraCrud.update(data.id, data); else await cameraCrud.create(data); cameraModalVisible.value = false; await loadCameras() } catch (err) { console.error(err) } finally { submitting.value = false } }
+async function saveCamera(data) { submitting.value = true; try { if (cameraEditing.value) await cameraCrud.update(data.id, data); else await cameraCrud.create(data); cameraModalVisible.value = false; await Promise.all([loadCameras(), loadCameraStatus()]) } catch (err) { console.error(err) } finally { submitting.value = false } }
 function confirmDeleteCamera(row) { deleteTargetName.value = row.name; deleteAction.value = () => deleteCamera(row.id); deleteDialogVisible.value = true }
 async function deleteCamera(id) { submitting.value = true; try { await cameraCrud.remove(id); deleteDialogVisible.value = false; await loadCameras() } catch (err) { console.error(err) } finally { submitting.value = false } }
 async function loadCameras() { loadingCameras.value = true; try { cameras.value = await cameraCrud.list() } catch (err) { console.error(err) } finally { loadingCameras.value = false } }
+
+// Live reachability per camera id; a missing id means not probed yet.
+const cameraStatus = ref({})
+async function loadCameraStatus() { try { cameraStatus.value = await fetchApi('/api/cameras/status/summary') } catch (err) { cameraStatus.value = {}; console.error(err) } }
+function cameraPill(camera) {
+  if (!camera.is_active) return { status: 'idle', label: 'Nonaktif' }
+  const ok = cameraStatus.value[camera.id]
+  if (ok === undefined) return { status: 'idle', label: 'Belum diketahui' }
+  return ok ? { status: 'online', label: 'Terhubung' } : { status: 'offline', label: 'Tidak terhubung' }
+}
 
 // Printers
 const printers = ref([])
@@ -789,8 +799,6 @@ const printerColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
   { prop: 'mode', label: 'Mode', width: 180 },
   { prop: 'gate_id', label: 'Gate', width: 100 },
-  { prop: 'gate_type', label: 'Tipe', width: 70 },
-  { prop: 'paper_remaining', label: 'Sisa Kertas', width: 110 },
   { prop: 'koneksi', label: 'Koneksi', width: 160, formatter: (_, row) => {
     if (row.mode === 'NETWORK') return `${row.ip_address || '-'}:${row.port || 9100}`
     if (row.mode === 'SERIAL') return `${row.serial_device || '-'} @ ${row.baudrate}`
@@ -803,7 +811,6 @@ const printerFields = computed(() => {
   return [
     { prop: 'name', label: 'Nama', type: 'text', required: true },
     { prop: 'gate_id', label: 'Gate', type: 'select', required: true, options: gateCodeOptions.value },
-    { prop: 'gate_type', label: 'Tipe Gate', type: 'select', required: true, options: [{ label: 'Masuk (IN)', value: 'IN' }, { label: 'Keluar (OUT)', value: 'OUT' }] },
     { prop: 'mode', label: 'Mode', type: 'select', required: true, options: [{ label: 'Otomatis (deteksi sendiri)', value: 'AUTO' }, { label: 'Controller Passthrough', value: 'CONTROLLER_PASSTHROUGH' }, { label: 'Network (TCP/IP)', value: 'NETWORK' }, { label: 'Serial / USB', value: 'SERIAL' }] },
     ...(mode === 'NETWORK'
       ? [
@@ -817,11 +824,10 @@ const printerFields = computed(() => {
         ]
       : []
     ),
-    { prop: 'paper_remaining', label: 'Sisa Kertas', type: 'number' },
     { prop: 'is_active', label: 'Aktif', type: 'boolean' },
   ]
 })
-function openPrinterModal(row = null) { printerEditing.value = !!row; printerForm.value = row ? { ...row } : { mode: 'CONTROLLER_PASSTHROUGH', gate_type: 'OUT', baudrate: 9600, port: 9100, is_active: true }; printerModalVisible.value = true }
+function openPrinterModal(row = null) { printerEditing.value = !!row; printerForm.value = row ? { ...row } : { mode: 'CONTROLLER_PASSTHROUGH', baudrate: 9600, port: 9100, is_active: true }; printerModalVisible.value = true }
 async function savePrinter(data) { submitting.value = true; try { if (printerEditing.value) await printerCrud.update(data.id, data); else await printerCrud.create(data); printerModalVisible.value = false; await loadPrinters() } catch (err) { console.error(err) } finally { submitting.value = false } }
 function confirmDeletePrinter(row) { deleteTargetName.value = row.name; deleteAction.value = () => deletePrinter(row.id); deleteDialogVisible.value = true }
 async function deletePrinter(id) { submitting.value = true; try { await printerCrud.remove(id); deleteDialogVisible.value = false; await loadPrinters() } catch (err) { console.error(err) } finally { submitting.value = false } }
@@ -869,10 +875,10 @@ function executeDelete() { if (deleteAction.value) deleteAction.value() }
 // manual reload. Only refetches while Overview is visible.
 let overviewTimer = null
 onMounted(() => {
-  loadGates(); loadPos(); loadCameras(); loadPrinters(); loadEmoneyReaders()
+  loadGates(); loadPos(); loadCameras(); loadCameraStatus(); loadPrinters(); loadEmoneyReaders()
   overviewTimer = setInterval(() => {
     if (activeTab.value === 'overview') {
-      loadGates(); loadPrinters(); loadEmoneyReaders()
+      loadGates(); loadCameraStatus(); loadPrinters(); loadEmoneyReaders()
     }
   }, 15000)
 })

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import require_admin, require_auth
+from api.app.models.gate import Gate
 from api.app.models.printer import Printer
 from api.database import get_db
 from shared.config import get_settings
@@ -24,7 +25,6 @@ router = APIRouter(prefix="/printers", tags=["printers"])
 
 class PrinterCreateRequest(BaseModel):
     gate_id: str
-    gate_type: str = "IN"
     name: str
     mode: str = "CONTROLLER_PASSTHROUGH"
     ip_address: str | None = None
@@ -42,6 +42,7 @@ class PrinterCreateRequest(BaseModel):
 
 
 class PrinterUpdateRequest(BaseModel):
+    gate_id: str | None = None
     name: str | None = None
     mode: str | None = None
     ip_address: str | None = None
@@ -116,6 +117,16 @@ def _to_response(p: Printer) -> PrinterResponse:
     )
 
 
+async def _gate_direction(db: AsyncSession, gate_code: str) -> str:
+    """Printer.gate_type always follows its gate; print routing filters on it."""
+    direction = (
+        await db.execute(select(Gate.direction).where(Gate.code == gate_code))
+    ).scalar_one_or_none()
+    if direction is None:
+        raise HTTPException(status_code=400, detail=f"Gate {gate_code} tidak ditemukan")
+    return direction
+
+
 # ---------------------------------------------------------------------------
 # CRUD Routes
 # ---------------------------------------------------------------------------
@@ -145,7 +156,7 @@ async def create_printer(
     """Create a new printer."""
     printer = Printer(
         gate_id=req.gate_id,
-        gate_type=req.gate_type,
+        gate_type=await _gate_direction(db, req.gate_id),
         name=req.name,
         mode=req.mode,
         ip_address=req.ip_address,
@@ -190,7 +201,13 @@ async def update_printer(
     if printer is None:
         raise HTTPException(status_code=404, detail="Printer not found")
 
-    for field, value in req.model_dump(exclude_unset=True).items():
+    updates = req.model_dump(exclude_unset=True)
+    gate_id = updates.pop("gate_id", None)
+    # The UI sends the whole row: only a real gate change may touch gate_type.
+    if gate_id and gate_id != printer.gate_id:
+        printer.gate_type = await _gate_direction(db, gate_id)
+        printer.gate_id = gate_id
+    for field, value in updates.items():
         setattr(printer, field, value)
 
     await db.commit()

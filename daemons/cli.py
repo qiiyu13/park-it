@@ -125,9 +125,10 @@ async def _build_config(session: AsyncSession, gate_code: str, *, quiet: bool = 
             Printer.gate_id == gate_code,
             Printer.gate_type == "IN",
             Printer.is_active == True,  # noqa: E712
-        )
+        ).order_by(Printer.id)
     )
-    printer = printer_result.scalar_one_or_none()
+    # A gate may have several printers; the oldest wins, as in print_worker.
+    printer = printer_result.scalars().first()
 
     # Shared printer referenced from the gate form wins over gate-bound rows.
     pid = (gate.hardware_config or {}).get("printer_id") if gate else None
