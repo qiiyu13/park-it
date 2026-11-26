@@ -384,6 +384,31 @@ async def main() -> None:
                     logger.warning("pending_open_loop_error", error=str(e))
             await asyncio.sleep(2)
 
+    async def _poll_pending_print() -> None:
+        """Print receipts/slips the server queued for a USB/serial printer here.
+
+        The server cannot reach a printer plugged into this PC, so it queues
+        the ESC/POS bytes in Redis (5 min expiry) and we take them every second.
+        """
+        import base64
+
+        booth_code = config["code"]
+        while True:
+            for job in await api_client.take_pending_print(booth_code):
+                device = job.get("device")
+                try:
+                    data = base64.b64decode(job.get("data_b64") or "")
+                    written = await asyncio.to_thread(
+                        serial_manager.write_device,
+                        device,
+                        int(job.get("baudrate") or 9600),
+                        data,
+                    )
+                    logger.info("booth_print_done", device=device, bytes=written)
+                except Exception as e:
+                    logger.error("booth_print_failed", device=device, error=str(e))
+            await asyncio.sleep(1)
+
     async def _ws_serve_lifetime() -> None:
         """Wait for ws_server's underlying serve task to terminate, then rebind.
 
@@ -541,6 +566,14 @@ async def main() -> None:
             asyncio.create_task(
                 _supervise("api_heartbeat", _send_heartbeats),
                 name="sup_api_heartbeat",
+            )
+        )
+
+    if api_client and config.get("code"):
+        supervisors.append(
+            asyncio.create_task(
+                _supervise("pending_print_poller", _poll_pending_print),
+                name="sup_pending_print",
             )
         )
 

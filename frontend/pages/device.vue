@@ -753,6 +753,7 @@ const PRINTER_PLACES = {
   NETWORK: 'Jaringan LAN',
   SERIAL: 'USB / Serial server',
   USB: 'USB / Serial server',
+  BOOTH: 'PC booth',
   AUTO: 'Otomatis',
 }
 const printerFields = computed(() => {
@@ -766,6 +767,14 @@ const printerFields = computed(() => {
     placeholder: '/dev/usb/lp0 atau /dev/ttyUSB0',
     helper: 'USB: /dev/usb/lp0. Serial: /dev/ttyUSB0 atau nama dari tab Alat Serial. Harus terpasang di komputer server, bukan PC booth.',
   })
+  const boothFields = [
+    { prop: 'pos_id', label: 'PC Booth', type: 'select', required: true, options: posOptions.value },
+    {
+      prop: 'serial_device', label: 'Device di PC booth', type: 'text', placeholder: '/dev/usb/lp0 atau /dev/ttyUSB0',
+      helper: 'Kosongkan untuk memakai printer struk yang diatur saat instalasi booth. Dicetak oleh booth bridge di PC tersebut.',
+    },
+    { prop: 'baudrate', label: 'Baudrate', type: 'number', placeholder: '9600', helper: 'Hanya untuk serial; USB mengabaikannya.' },
+  ]
   return [
     { prop: 'name', label: 'Nama', type: 'text', required: true },
     { prop: 'gate_id', label: 'Gate', type: 'select', required: true, options: gateCodeOptions.value },
@@ -773,6 +782,7 @@ const printerFields = computed(() => {
       { label: 'Controller gate (PCLess, serial)', value: 'CONTROLLER_PASSTHROUGH' },
       { label: 'Jaringan LAN (printer ber-IP)', value: 'NETWORK' },
       { label: 'USB / Serial di komputer server', value: 'SERIAL' },
+      { label: 'USB / Serial di PC booth (struk gate keluar)', value: 'BOOTH' },
       { label: 'Otomatis (coba LAN → USB/Serial → controller)', value: 'AUTO' },
     ], helper: mode === 'CONTROLLER_PASSTHROUGH' ? 'Dicetak lewat controller gate yang dipilih di atas. Tidak perlu isian lain.' : '' },
     ...(mode === 'NETWORK'
@@ -781,6 +791,8 @@ const printerFields = computed(() => {
       ? [deviceField(true), { prop: 'baudrate', label: 'Baudrate', type: 'number', placeholder: '9600', helper: 'Hanya untuk serial; USB mengabaikannya.' }]
       : mode === 'AUTO'
       ? [...ipFields(false), deviceField(false)]
+      : mode === 'BOOTH'
+      ? boothFields
       : []
     ),
     { prop: 'is_active', label: 'Aktif', type: 'boolean' },

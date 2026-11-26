@@ -292,6 +292,47 @@ def _build_escpos_shift_slip(summary: dict[str, Any], location_name: str = "") -
     return b"".join(out)
 
 
+BOOTH_PRINT_TTL_S = 300  # a receipt nobody picked up in 5 min is stale; drop it
+
+
+def booth_print_key(booth_code: str) -> str:
+    """Redis list the booth bridge drains via POST /api/pos/pending-print."""
+    return f"booth:print:{booth_code}"
+
+
+async def _queue_booth_print(escpos_data: bytes, print_config: dict[str, Any]) -> str:
+    """Hand ESC/POS bytes to the booth PC that owns the printer.
+
+    The server cannot reach a USB/serial printer on another PC; the booth
+    bridge polls this list every second and writes the bytes locally.
+    """
+    import base64
+    import json
+
+    from shared.redis import redis_client
+
+    booth_code = print_config.get("booth_code")
+    if not booth_code:
+        raise ValueError("Printer PC booth belum memilih booth")
+    key = booth_print_key(booth_code)
+    await redis_client.connect()
+    await redis_client.client.rpush(key, json.dumps({
+        "data_b64": base64.b64encode(escpos_data).decode(),
+        "device": print_config.get("printer_device") or None,
+        "baudrate": print_config.get("baudrate") or 9600,
+    }))
+    await redis_client.client.expire(key, BOOTH_PRINT_TTL_S)
+    return key
+
+
+async def _deliver(escpos_data: bytes, mode: str, print_config: dict[str, Any]) -> None:
+    """Send ESC/POS bytes: booth printers via the bridge queue, the rest directly."""
+    if mode == "BOOTH":
+        await _queue_booth_print(escpos_data, print_config)
+    else:
+        _send_escpos(escpos_data, mode, print_config)
+
+
 def _send_escpos(escpos_data: bytes, mode: str, print_config: dict[str, Any]) -> None:
     """Write ready ESC/POS bytes through the transport the config resolved to."""
     if mode == "CONTROLLER_PASSTHROUGH":
@@ -322,7 +363,7 @@ async def print_shift_slip(
         path = _mock_write(gate_id, "shift_slip", escpos_data)
         return {"status": "success", "message": "Shift slip printed (MOCK)", "path": path}
     try:
-        _send_escpos(escpos_data, mode, print_config)
+        await _deliver(escpos_data, mode, print_config)
         return {"status": "success", "message": "Shift slip printed"}
     except Exception as e:
         logger.error("print_shift_slip_failed", gate_id=gate_id, error=str(e))
@@ -701,6 +742,17 @@ async def _get_print_config(gate_id: str, gate_type: str = "OUT") -> dict[str, A
                     if shared is not None:
                         printer = shared
 
+            if printer is not None and printer.mode == "BOOTH":
+                from api.app.models.pos import Pos
+
+                booth = await db.get(Pos, printer.pos_id) if printer.pos_id else None
+                return {
+                    "mode": "BOOTH",
+                    "booth_code": booth.code if booth else None,
+                    "printer_device": printer.serial_device,
+                    "baudrate": printer.baudrate,
+                }
+
             if printer is None or printer.mode in ("CONTROLLER_PASSTHROUGH", "AUTO"):
                 # AUTO: use the first transport that actually answers right now,
                 # so swapping a printer (network ↔ serial ↔ behind-controller)
@@ -915,7 +967,7 @@ async def print_receipt(
         return {"status": "success", "message": "Receipt printed (MOCK)", "path": path}
 
     try:
-        _send_escpos(escpos_data, mode, print_config)
+        await _deliver(escpos_data, mode, print_config)
 
         # Decrement paper counter on success
         await _decrement_paper_counter(printer_id)

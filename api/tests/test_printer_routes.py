@@ -97,3 +97,53 @@ async def test_usb_serial_choice_routes_by_device_path(
         "mode": "USB", "printer_device": "/dev/usb/lp0",
     }
     assert (await _get_print_config("GOUT-01", gate_type="OUT"))["mode"] == "SERIAL"
+
+
+async def test_booth_printer_needs_booth_and_exit_gate(client: AsyncClient, db_session: AsyncSession):
+    from api.app.models.pos import Pos
+
+    booth = Pos(name="Booth 1", code="BOOTH")
+    db_session.add(booth)
+    await db_session.commit()
+
+    def body(gate, **extra):
+        return {"gate_id": gate, "name": "P", "mode": "BOOTH", **extra}
+
+    assert (await client.post("/api/printers/", json=body("GOUT-01"))).status_code == 400
+    assert (await client.post("/api/printers/", json=body("GIN-01", pos_id=booth.id))).status_code == 400
+    created = await client.post("/api/printers/", json=body("GOUT-01", pos_id=booth.id))
+    assert created.status_code == 201 and created.json()["pos_id"] == booth.id
+
+
+async def test_booth_receipt_is_queued_for_the_bridge(
+    client: AsyncClient, db_session: AsyncSession, engine, monkeypatch
+):
+    import base64
+
+    from api.app.middleware.api_key import require_api_key
+    from api.app.models.pos import Pos
+    from workers.critical import print_worker as pw
+
+    booth = Pos(name="Booth 1", code="BOOTH")
+    db_session.add(booth)
+    await db_session.commit()
+    db_session.add(Printer(
+        gate_id="GOUT-01", gate_type="OUT", name="usb", mode="BOOTH",
+        pos_id=booth.id, serial_device="/dev/usb/lp0",
+    ))
+    await db_session.commit()
+    monkeypatch.setattr("api.database.AsyncSessionLocal", async_sessionmaker(engine))
+
+    config = await pw._get_print_config("GOUT-01", gate_type="OUT")
+    assert config == {
+        "mode": "BOOTH", "booth_code": "BOOTH", "printer_device": "/dev/usb/lp0", "baudrate": 9600,
+    }
+    await pw._deliver(b"\x1b@STRUK", config["mode"], config)
+
+    app.dependency_overrides[require_api_key] = lambda: True
+    jobs = (await client.post("/api/pos/pending-print", json={"booth_code": "BOOTH"})).json()["jobs"]
+    assert [(base64.b64decode(j["data_b64"]), j["device"]) for j in jobs] == [
+        (b"\x1b@STRUK", "/dev/usb/lp0")
+    ]
+    again = await client.post("/api/pos/pending-print", json={"booth_code": "BOOTH"})
+    assert again.json()["jobs"] == []  # taken jobs are gone

@@ -150,6 +150,15 @@ class ApiClient:
             logger.warning("pending_open_poll_failed", error=str(e))
             return {"command": None}
 
+    async def take_pending_print(self, booth_code: str) -> list[dict[str, Any]]:
+        """Take print jobs the server queued for printers on this booth PC."""
+        try:
+            result = await self._post("/api/pos/pending-print", {"booth_code": booth_code})
+            return list((result or {}).get("jobs") or [])
+        except Exception as e:
+            logger.warning("pending_print_poll_failed", error=str(e))
+            return []
+
     async def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """POST /api/pos/heartbeat. Returns ``None`` on transport failure.
 

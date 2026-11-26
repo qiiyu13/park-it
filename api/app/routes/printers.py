@@ -31,9 +31,10 @@ class PrinterCreateRequest(BaseModel):
     port: int | None = None
     serial_device: str | None = None
     baudrate: int = 9600
+    pos_id: int | None = None
     paper_capacity: int = 300
 
-    @field_validator("port", mode="before")
+    @field_validator("port", "pos_id", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
         if v == "" or v is None:
@@ -49,10 +50,11 @@ class PrinterUpdateRequest(BaseModel):
     port: int | None = None
     serial_device: str | None = None
     baudrate: int | None = None
+    pos_id: int | None = None
     paper_capacity: int | None = None
     is_active: bool | None = None
 
-    @field_validator("port", "baudrate", "paper_capacity", mode="before")
+    @field_validator("port", "baudrate", "paper_capacity", "pos_id", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
         """The UI's number inputs submit "" when cleared — treat as unset."""
@@ -75,6 +77,7 @@ class PrinterResponse(BaseModel):
     port: int | None
     serial_device: str | None
     baudrate: int
+    pos_id: int | None
     paper_remaining: int
     paper_capacity: int
     last_refilled_at: datetime | None
@@ -109,6 +112,7 @@ def _to_response(p: Printer) -> PrinterResponse:
         port=p.port,
         serial_device=p.serial_device,
         baudrate=p.baudrate,
+        pos_id=p.pos_id,
         paper_remaining=p.paper_remaining,
         paper_capacity=p.paper_capacity,
         last_refilled_at=p.last_refilled_at,
@@ -125,6 +129,19 @@ async def _gate_direction(db: AsyncSession, gate_code: str) -> str:
     if direction is None:
         raise HTTPException(status_code=400, detail=f"Gate {gate_code} tidak ditemukan")
     return direction
+
+
+def _check_booth_printer(printer: Printer) -> None:
+    """A booth-PC printer serves exit receipts only and needs its booth."""
+    if printer.mode != "BOOTH":
+        return
+    if not printer.pos_id:
+        raise HTTPException(status_code=400, detail="Pilih PC booth tempat printer terpasang")
+    if printer.gate_type != "OUT":
+        raise HTTPException(
+            status_code=400,
+            detail="Printer di PC booth hanya untuk gate keluar; tiket masuk dicetak server/controller",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +180,11 @@ async def create_printer(
         port=req.port,
         serial_device=req.serial_device,
         baudrate=req.baudrate,
+        pos_id=req.pos_id,
         paper_capacity=req.paper_capacity,
         paper_remaining=req.paper_capacity,
     )
+    _check_booth_printer(printer)
     db.add(printer)
     await db.commit()
     await db.refresh(printer)
@@ -209,6 +228,7 @@ async def update_printer(
         printer.gate_id = gate_id
     for field, value in updates.items():
         setattr(printer, field, value)
+    _check_booth_printer(printer)
 
     await db.commit()
     await db.refresh(printer)
@@ -330,6 +350,8 @@ async def test_printer(
     ])
 
     mode = (printer.mode or "AUTO").upper()
+    if mode == "BOOTH":
+        return await _test_booth_printer(db, printer, escpos)
     if mode in ("AUTO", "CONTROLLER_PASSTHROUGH"):
         if pw._probe_network_printer(printer.ip_address, printer.port):
             mode = "NETWORK"
@@ -386,6 +408,33 @@ async def test_printer(
 
     logger.info("printer_test_ok", printer_id=printer_id, mode=mode)
     return {"success": True, "mode": mode, "detail": f"Test print sent via {mode}"}
+
+
+async def _test_booth_printer(db: AsyncSession, printer: Printer, escpos: bytes) -> dict:
+    """Queue a test page for the booth bridge and wait for it to be taken."""
+    from api.app.models.pos import Pos
+    from shared.redis import redis_client
+    from workers.critical import print_worker as pw
+
+    booth = await db.get(Pos, printer.pos_id) if printer.pos_id else None
+    if booth is None:
+        raise HTTPException(status_code=400, detail="Printer belum terhubung ke PC booth")
+    key = await pw._queue_booth_print(escpos, {
+        "booth_code": booth.code,
+        "printer_device": printer.serial_device,
+        "baudrate": printer.baudrate,
+    })
+    for _ in range(16):  # the bridge polls every second
+        await asyncio.sleep(0.5)
+        if not await redis_client.client.exists(key):
+            logger.info("printer_test_ok", printer_id=printer.id, mode="BOOTH", booth=booth.code)
+            return {"success": True, "mode": "BOOTH", "detail": f"Dikirim ke PC booth {booth.code}"}
+    await redis_client.client.delete(key)
+    logger.warning("printer_test_failed", printer_id=printer.id, mode="BOOTH", booth=booth.code)
+    raise HTTPException(
+        status_code=502,
+        detail=f"PC booth {booth.code} tidak mengambil cetakan — cek booth bridge di PC booth",
+    )
 
 
 @router.get("/status/summary")

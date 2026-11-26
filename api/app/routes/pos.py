@@ -370,6 +370,29 @@ async def reprint_last_receipt(
     return {"success": True, "transaction_id": tx.id}
 
 
+@router.post("/pending-print")
+async def take_pending_print(
+    payload: PendingOpenRequest,
+    _: bool = Depends(require_api_key),
+) -> dict:
+    """Booth bridge poller: take queued print jobs for printers on this booth PC.
+
+    Each job is {data_b64, device, baudrate}; a blank device means the booth's
+    own receipt_printer from booth.json.
+    """
+    from workers.critical.print_worker import booth_print_key
+
+    await redis_client.connect()
+    raw_jobs = await redis_client.client.lpop(booth_print_key(payload.booth_code), 10) or []
+    jobs = []
+    for raw in raw_jobs:
+        try:
+            jobs.append(json.loads(raw))
+        except json.JSONDecodeError:
+            logger.warning("booth_print_job_invalid", booth=payload.booth_code)
+    return {"jobs": jobs}
+
+
 @router.post("/pending-open")
 async def take_pending_open(
     payload: PendingOpenRequest,

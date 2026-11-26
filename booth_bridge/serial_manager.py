@@ -195,6 +195,35 @@ class SerialManager:
                 conn = self._reconnect(peripheral)
                 return int(conn.write(data) or 0)
 
+    def write_device(self, device: str | None, baudrate: int, data: bytes) -> int:
+        """Write a server-queued print job to a printer on this PC.
+
+        ``device`` comes from the server's printer form; blank means this
+        booth's own ``receipt_printer`` from booth.json. USB printers
+        (/dev/usb/lp*) are plain character devices that pyserial cannot open,
+        so they are written as files. A serial device already managed here
+        goes through ``write_only`` so its lock is shared.
+        """
+        target = device or (self.peripherals.get("receipt_printer") or {}).get("device")
+        if not target:
+            raise RuntimeError("No printer device: set one in the server form or booth.json")
+        with self._lock_for(f"device:{target}"):
+            if str(target).startswith("/dev/usb/lp"):
+                with open(target, "wb") as f:
+                    return f.write(data)
+            managed = next(
+                (
+                    name
+                    for name, cfg in self.peripherals.items()
+                    if cfg.get("enabled") and cfg.get("device") == target
+                ),
+                None,
+            )
+            if managed is not None:
+                return self.write_only(managed, data)
+            with serial.Serial(port=target, baudrate=baudrate, timeout=1, write_timeout=5) as conn:
+                return int(conn.write(data) or 0)
+
     def is_connected(self, peripheral: str) -> bool:
         """Check if a peripheral is connected."""
         conn = self._connections.get(peripheral)
