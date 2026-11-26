@@ -122,12 +122,18 @@ async def test_force_leave_from_active_prints_slip(site):
     assert [name for name, _ in arq.jobs] == ["print_shift_slip"]
 
 
-async def test_pos_cash_counter_excludes_change(site):
-    client, _, _ = site
-    data = (await client.get("/api/pos/shift-summary")).json()
-    # Counter is per login user per day: 5.000 + 3.000 plus the three 9.999 rows.
-    # Summing paid_amount instead would add the 5.000 change.
-    assert data["cash_collected"] == 5000 + 3000 + 3 * 9999
+async def test_pos_cash_counter_excludes_change(site, db_session: AsyncSession):
+    client, session, _ = site
+    before = (await client.get("/api/pos/shift-summary")).json()["cash_collected"]
+    # Driver hands over 10.000 for a 4.000 fee and gets 6.000 back.
+    db_session.add(ParkingTransaction(
+        barcode=uuid.uuid4().hex[:10], entry_time=datetime.now(UTC) - timedelta(minutes=5),
+        exit_time=datetime.now(UTC), gate_out_id=session.gate_id, payment_method="CASH",
+        fee=4000, paid_amount=10000, status="COMPLETED", operator_id=session.worker_id,
+    ))
+    await db_session.commit()
+    after = (await client.get("/api/pos/shift-summary")).json()["cash_collected"]
+    assert after - before == 4000
 
 
 def test_terbilang_and_slip():
