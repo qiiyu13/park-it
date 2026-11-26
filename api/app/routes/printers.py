@@ -339,6 +339,8 @@ async def test_printer(
             mode = "USB"
         else:
             mode = "CONTROLLER_PASSTHROUGH"
+    elif mode == "SERIAL" and pw._is_usblp(printer.serial_device):
+        mode = "USB"  # one "USB / Serial" form choice; the device path decides
 
     config: dict = {}
     if mode == "NETWORK":

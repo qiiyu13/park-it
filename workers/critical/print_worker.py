@@ -31,6 +31,11 @@ def _probe_network_printer(ip: str | None, port: int | None = 9100, timeout: flo
         return False
 
 
+def _is_usblp(device: str | None) -> bool:
+    """usblp character devices (/dev/usb/lp*) are USB printers, not serial ports."""
+    return bool(device) and str(device).startswith("/dev/usb/lp")
+
+
 def _probe_usb_printer(device: str | None) -> bool:
     """True when a usblp character device (e.g. /dev/usb/lp1) exists."""
     if not device:
@@ -45,7 +50,7 @@ def _probe_serial_device(device: str | None) -> bool:
         return False
     # usblp character devices (/dev/usb/lp*) are printers, not serial ports —
     # they are handled by the USB writer, not python-escpos Serial.
-    if str(device).startswith("/dev/usb/lp"):
+    if _is_usblp(device):
         return False
     import os
 
@@ -731,15 +736,16 @@ async def _get_print_config(gate_id: str, gate_type: str = "OUT") -> dict[str, A
                     "printer_port": printer.port or 9100,
                 }
 
+            # The form offers one "USB / Serial" choice; the device path decides.
+            if printer.mode == "USB" or (printer.mode == "SERIAL" and _is_usblp(printer.serial_device)):
+                return {"mode": "USB", "printer_device": printer.serial_device}
+
             if printer.mode == "SERIAL":
                 return {
                     "mode": "SERIAL",
                     "printer_device": printer.serial_device,
                     "baudrate": printer.baudrate,
                 }
-
-            if printer.mode == "USB":
-                return {"mode": "USB", "printer_device": printer.serial_device}
 
             return {"mode": printer.mode}
 

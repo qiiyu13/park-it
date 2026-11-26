@@ -737,7 +737,7 @@ const printerEditing = ref(false)
 const printerForm = ref({})
 const printerColumns = [
   { prop: 'name', label: 'Nama', sortable: true },
-  { prop: 'mode', label: 'Mode', width: 180 },
+  { prop: 'mode', label: 'Terpasang di', width: 180, formatter: (v) => PRINTER_PLACES[v] || v },
   { prop: 'gate_id', label: 'Gate', width: 100 },
   { prop: 'koneksi', label: 'Koneksi', width: 160, formatter: (_, row) => {
     if (row.mode === 'NETWORK') return `${row.ip_address || '-'}:${row.port || 9100}`
@@ -746,22 +746,41 @@ const printerColumns = [
   }},
   { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },
 ]
+// Where the printer is plugged in decides how the server reaches it (Compass
+// had the same choice: via controller / IP / serial / Windows-USB).
+const PRINTER_PLACES = {
+  CONTROLLER_PASSTHROUGH: 'Controller gate',
+  NETWORK: 'Jaringan LAN',
+  SERIAL: 'USB / Serial server',
+  USB: 'USB / Serial server',
+  AUTO: 'Otomatis',
+}
 const printerFields = computed(() => {
   const mode = printerForm.value.mode
+  const ipFields = (required) => [
+    { prop: 'ip_address', label: 'IP Address', type: 'text', required, placeholder: '192.168.1.x' },
+    { prop: 'port', label: 'Port', type: 'number', placeholder: '9100' },
+  ]
+  const deviceField = (required) => ({
+    prop: 'serial_device', label: 'Device', type: 'text', required,
+    placeholder: '/dev/usb/lp0 atau /dev/ttyUSB0',
+    helper: 'USB: /dev/usb/lp0. Serial: /dev/ttyUSB0 atau nama dari tab Alat Serial. Harus terpasang di komputer server, bukan PC booth.',
+  })
   return [
     { prop: 'name', label: 'Nama', type: 'text', required: true },
     { prop: 'gate_id', label: 'Gate', type: 'select', required: true, options: gateCodeOptions.value },
-    { prop: 'mode', label: 'Mode', type: 'select', required: true, options: [{ label: 'Otomatis (deteksi sendiri)', value: 'AUTO' }, { label: 'Controller Passthrough', value: 'CONTROLLER_PASSTHROUGH' }, { label: 'Network (TCP/IP)', value: 'NETWORK' }, { label: 'Serial / USB', value: 'SERIAL' }] },
+    { prop: 'mode', label: 'Terpasang di', type: 'select', required: true, options: [
+      { label: 'Controller gate (PCLess, serial)', value: 'CONTROLLER_PASSTHROUGH' },
+      { label: 'Jaringan LAN (printer ber-IP)', value: 'NETWORK' },
+      { label: 'USB / Serial di komputer server', value: 'SERIAL' },
+      { label: 'Otomatis (coba LAN → USB/Serial → controller)', value: 'AUTO' },
+    ], helper: mode === 'CONTROLLER_PASSTHROUGH' ? 'Dicetak lewat controller gate yang dipilih di atas. Tidak perlu isian lain.' : '' },
     ...(mode === 'NETWORK'
-      ? [
-          { prop: 'ip_address', label: 'IP Address', type: 'text', required: true, placeholder: '192.168.1.x' },
-          { prop: 'port', label: 'Port', type: 'number', placeholder: '9100' },
-        ]
-      : mode === 'SERIAL'
-      ? [
-          { prop: 'serial_device', label: 'Device Serial', type: 'text', required: true, placeholder: '/dev/parking-printer' },
-          { prop: 'baudrate', label: 'Baudrate', type: 'number', placeholder: '9600' },
-        ]
+      ? ipFields(true)
+      : mode === 'SERIAL' || mode === 'USB'
+      ? [deviceField(true), { prop: 'baudrate', label: 'Baudrate', type: 'number', placeholder: '9600', helper: 'Hanya untuk serial; USB mengabaikannya.' }]
+      : mode === 'AUTO'
+      ? [...ipFields(false), deviceField(false)]
       : []
     ),
     { prop: 'is_active', label: 'Aktif', type: 'boolean' },

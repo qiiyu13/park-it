@@ -79,3 +79,21 @@ async def test_two_printers_on_one_gate_use_the_oldest(
     monkeypatch.setattr("api.database.AsyncSessionLocal", async_sessionmaker(engine))
     config = await _get_print_config("GIN-01", gate_type="IN")
     assert config["printer_ip_address"] == "10.0.0.1"
+
+
+async def test_usb_serial_choice_routes_by_device_path(
+    client: AsyncClient, db_session: AsyncSession, engine, monkeypatch
+):
+    db_session.add_all([
+        Printer(gate_id="GIN-01", gate_type="IN", name="usb", mode="SERIAL", serial_device="/dev/usb/lp0"),
+        Printer(gate_id="GOUT-01", gate_type="OUT", name="com", mode="SERIAL", serial_device="/dev/ttyUSB0"),
+    ])
+    await db_session.commit()
+
+    from workers.critical.print_worker import _get_print_config
+
+    monkeypatch.setattr("api.database.AsyncSessionLocal", async_sessionmaker(engine))
+    assert await _get_print_config("GIN-01", gate_type="IN") == {
+        "mode": "USB", "printer_device": "/dev/usb/lp0",
+    }
+    assert (await _get_print_config("GOUT-01", gate_type="OUT"))["mode"] == "SERIAL"
