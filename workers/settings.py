@@ -33,6 +33,7 @@ class CriticalWorkerSettings:
     functions = [
         func("workers.critical.print_worker.print_ticket", name="print_ticket"),
         func("workers.critical.print_worker.print_receipt", name="print_receipt"),
+        func("workers.critical.print_worker.print_shift_slip", name="print_shift_slip"),
         func("workers.critical.snapshot_worker.take_snapshot", name="take_snapshot"),
     ]
 

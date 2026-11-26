@@ -38,6 +38,22 @@
             <div class="text-[11px]  tracking-widest pos-label text-muted-foreground">PETUGAS AKTIF</div>
             <div class="pos-display text-2xl">{{ currentWorker?.full_name || currentWorker?.username }}</div>
           </div>
+          <div class="pos-choice p-4 mb-4">
+            <div class="text-[11px]  tracking-widest pos-label text-muted-foreground">PENERIMAAN SHIFT INI</div>
+            <template v-if="summary">
+              <div class="mt-2 grid grid-cols-4 gap-3">
+                <div v-for="m in methodRows" :key="m.label">
+                  <div class="pos-body text-xs text-muted-foreground">{{ m.label }} ({{ m.count }})</div>
+                  <div class="pos-display text-lg leading-tight">Rp {{ formatRp(m.amount) }}</div>
+                </div>
+              </div>
+              <div class="mt-3 flex items-baseline justify-between border-t border-dashed border-border pt-2">
+                <span class="pos-label text-sm">Uang tunai diserahkan</span>
+                <span class="pos-display text-2xl">Rp {{ formatRp(summary.cash_amount) }}</span>
+              </div>
+            </template>
+            <div v-else class="pos-body text-sm text-muted-foreground mt-1">{{ summaryError || 'Menghitung…' }}</div>
+          </div>
           <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-2">PIN ANDA</div>
           <div class="flex gap-2 mb-4">
             <div
@@ -68,7 +84,7 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
             <div class="pos-display text-lg leading-tight">
               {{ currentWorker?.full_name || currentWorker?.username }} keluar shift · PIN diverifikasi
             </div>
-            <div class="pos-body text-xs text-muted-foreground">tutup kas: Rp {{ formatRp(closingAmount) }} · {{ txCount }} transaksi</div>
+            <div v-if="summary" class="pos-body text-xs text-muted-foreground">tutup kas: Rp {{ formatRp(summary.cash_amount) }} tunai · {{ summary.total_count }} transaksi · slip laporan dicetak</div>
           </div>
 
           <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-2">SIAPA YANG MASUK?</div>
@@ -140,7 +156,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
         <!-- Footer actions -->
         <div class="flex items-center justify-between mt-4">
           <div class="pos-body text-xs text-muted-foreground italic max-w-md">
-            <template v-if="internalStep === 'outgoing'">setelah langkah 1 → konfirmasi tutup kas oleh petugas masuk</template>
+            <template v-if="internalStep === 'outgoing'">setelah PIN, slip laporan penerimaan dicetak → serahkan uang ke petugas masuk</template>
             <template v-else-if="internalStep === 'pending'">petugas pengganti harus konfirmasi sebelum Anda boleh meninggalkan pos</template>
             <template v-else>tindakan ini dicatat audit</template>
           </div>
@@ -206,8 +222,6 @@ const props = defineProps({
   isLoading: { type: Boolean, default: false },
   initialStep: { type: String, default: 'outgoing' },
   earlyLeave: { type: Boolean, default: false },
-  closingAmount: { type: Number, default: 0 },
-  txCount: { type: Number, default: 0 },
 })
 const emit = defineEmits(['confirm-outgoing', 'confirm-incoming', 'force-leave', 'cancel'])
 
@@ -219,6 +233,29 @@ const incomingPin = ref('')
 const forceLeaveReason = ref('')
 const forcePin = ref('')
 const errorMsg = ref('')
+
+// Takings for this session; the server closes the window at handover.
+const { fetchApi } = useApi()
+const summary = ref(null)
+const summaryError = ref('')
+async function loadSummary() {
+  try {
+    summary.value = await fetchApi(`/api/worker-sessions/${props.sessionId}/summary`)
+    summaryError.value = ''
+  } catch {
+    summaryError.value = 'Ringkasan penerimaan tidak dapat dimuat'
+  }
+}
+const methodRows = computed(() => {
+  const by = summary.value?.by_method || {}
+  const pick = (code) => by[code] || { count: 0, amount: 0 }
+  return [
+    { label: 'Tunai', ...pick('CASH') },
+    { label: 'E-Money', ...pick('EMONEY') },
+    { label: 'Member', ...pick('RFID_MEMBER') },
+    { label: 'Total', count: summary.value.total_count, amount: summary.value.total_amount },
+  ]
+})
 
 const outgoingPinInput = ref(null)
 const incomingPinInput = ref(null)
@@ -272,6 +309,7 @@ function onKey(e) {
   }
 }
 onMounted(() => {
+  loadSummary()
   window.addEventListener('keydown', onKey)
   nextTick(() => outgoingPinInput.value?.focus())
 })
@@ -314,6 +352,6 @@ defineExpose({
     forcePin.value = ''
   },
   // Emit can't report failure, so the parent advances only after the API succeeds.
-  advanceToPending: () => { internalStep.value = 'pending' },
+  advanceToPending: () => { internalStep.value = 'pending'; loadSummary() },
 })
 </script>

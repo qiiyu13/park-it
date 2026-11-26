@@ -190,6 +190,140 @@ async def _decrement_paper_counter(printer_id: int) -> None:
         logger.error("paper_decrement_failed", printer_id=printer_id, error=str(e))
 
 
+_ANGKA = ["", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan",
+          "sembilan", "sepuluh", "sebelas"]
+
+
+def terbilang(n: int) -> str:
+    """Indonesian number words: 798000 -> "tujuh ratus sembilan puluh delapan ribu"."""
+    n = int(n)
+    if n < 0:
+        return "minus " + terbilang(-n)
+    if n < 12:
+        return _ANGKA[n] or "nol"
+    if n < 20:
+        return f"{_ANGKA[n - 10]} belas"
+    if n < 100:
+        return f"{_ANGKA[n // 10]} puluh {_ANGKA[n % 10]}".strip()
+    if n < 200:
+        return f"seratus {terbilang(n - 100) if n > 100 else ''}".strip()
+    if n < 1000:
+        return f"{_ANGKA[n // 100]} ratus {terbilang(n % 100) if n % 100 else ''}".strip()
+    if n < 2000:
+        return f"seribu {terbilang(n - 1000) if n > 1000 else ''}".strip()
+    for size, word in ((10**12, "triliun"), (10**9, "miliar"), (10**6, "juta"), (1000, "ribu")):
+        if n >= size:
+            head, rest = divmod(n, size)
+            return f"{terbilang(head)} {word} {terbilang(rest) if rest else ''}".strip()
+    return ""
+
+
+_SLIP_METHODS = (("CASH", "Tunai"), ("EMONEY", "E-Money"), ("RFID_MEMBER", "Member"))
+
+
+def _build_escpos_shift_slip(summary: dict[str, Any], location_name: str = "") -> bytes:
+    """Shift closing slip, after Compass "LAPORAN PENERIMAAN GATE OUT01".
+
+    Lists takings per payment method, the cash to hand over (with the amount in
+    words) and signature lines for the outgoing worker and the supervisor.
+    """
+    import textwrap
+
+    cols = PAPER_COLS
+
+    def line(text: str = "") -> bytes:
+        return (text[:cols] + "\n").encode()
+
+    def center(text: str) -> bytes:
+        return _center_line(text, cols)
+
+    def money_row(label: str, count: int | None, amount: int) -> bytes:
+        left = f"{label} ({count})" if count is not None else label
+        right = _format_rp(amount)
+        return line(f"{left}{' ' * max(1, cols - len(left) - len(right))}{right}")
+
+    def when(iso: str) -> str:
+        day, clock = _format_dt(iso)
+        return f"{day} {clock[:5]}".strip()
+
+    by_method = summary.get("by_method") or {}
+    known = {code for code, _ in _SLIP_METHODS}
+    rows = [(label, by_method.get(code, {})) for code, label in _SLIP_METHODS]
+    other = [m for code, m in by_method.items() if code not in known]
+    if other:
+        rows.append(("Lainnya", {
+            "count": sum(m.get("count", 0) for m in other),
+            "amount": sum(m.get("amount", 0) for m in other),
+        }))
+    gate = f"{summary.get('gate_name', '')} ({summary.get('gate_code', '')})".strip()
+    cash = int(summary.get("cash_amount") or 0)
+    worker = summary.get("worker_name") or "-"
+    rule = line("-" * cols)
+
+    out: list[bytes] = [b"\x1b@", center(location_name)] if location_name else [b"\x1b@"]
+    out += [
+        b"\x1bE\x01", center("LAPORAN PENERIMAAN"), b"\x1bE\x00",
+        center(gate),
+        line(),
+        line(f"Petugas : {worker}"),
+        line(f"Shift   : {summary.get('shift_name') or '-'}"),
+        line(f"Mulai   : {when(summary.get('started_at', ''))}"),
+        line(f"Tutup   : {when(summary.get('closed_at', ''))}"),
+        rule,
+    ]
+    out += [money_row(label, int(m.get("count", 0)), int(m.get("amount", 0))) for label, m in rows]
+    out += [
+        rule,
+        money_row("Total", int(summary.get("total_count") or 0), int(summary.get("total_amount") or 0)),
+        b"\x1bE\x01", money_row("Uang tunai diserahkan", None, cash), b"\x1bE\x00",
+        line("Terbilang:"),
+        *(line(part) for part in textwrap.wrap(f"## {terbilang(cash)} rupiah ##", cols)),
+        line(),
+        line(f"{'Dibuat oleh,':<{cols // 2}}Mengetahui,"),
+        line(), line(), line(),
+        line(f"{'(' + worker[: cols // 2 - 3] + ')':<{cols // 2}}(" + "_" * (cols // 2 - 3) + ")"),
+        b"\n\n\n\x1d\x56\x41\x00",
+    ]
+    return b"".join(out)
+
+
+def _send_escpos(escpos_data: bytes, mode: str, print_config: dict[str, Any]) -> None:
+    """Write ready ESC/POS bytes through the transport the config resolved to."""
+    if mode == "CONTROLLER_PASSTHROUGH":
+        _print_via_controller(escpos_data, print_config)
+    elif mode == "NETWORK":
+        _print_via_network(escpos_data, print_config)
+    elif mode == "SERIAL":
+        _print_via_serial(escpos_data, print_config)
+    elif mode == "USB":
+        _print_via_usb(escpos_data, print_config)
+    else:
+        raise ValueError(f"Unknown print mode: {mode}")
+
+
+async def print_shift_slip(
+    ctx: dict[str, Any],
+    gate_id: str,
+    summary: dict[str, Any],
+) -> dict[str, str]:
+    """Print the shift closing slip on the exit gate's receipt printer."""
+    print_config = await _get_print_config(gate_id, gate_type="OUT")
+    mode = print_config.get("mode", "CONTROLLER_PASSTHROUGH")
+    location_name = await _get_site_name()
+    escpos_data = _build_escpos_shift_slip(summary, location_name)
+    logger.info("print_shift_slip_job", gate_id=gate_id, session_id=summary.get("session_id"), mode=mode)
+
+    if get_settings().mock_hardware:
+        path = _mock_write(gate_id, "shift_slip", escpos_data)
+        return {"status": "success", "message": "Shift slip printed (MOCK)", "path": path}
+    try:
+        _send_escpos(escpos_data, mode, print_config)
+        return {"status": "success", "message": "Shift slip printed"}
+    except Exception as e:
+        logger.error("print_shift_slip_failed", gate_id=gate_id, error=str(e))
+        return await _retry_or_alert(ctx, gate_id, "shift_slip", str(e))
+
+
 async def _get_site_header() -> tuple[str, str]:
     """(site name, subtitle) for ticket/receipt headers (cached 60s).
 
@@ -775,16 +909,7 @@ async def print_receipt(
         return {"status": "success", "message": "Receipt printed (MOCK)", "path": path}
 
     try:
-        if mode == "CONTROLLER_PASSTHROUGH":
-            _print_via_controller(escpos_data, print_config)
-        elif mode == "NETWORK":
-            _print_via_network(escpos_data, print_config)
-        elif mode == "SERIAL":
-            _print_via_serial(escpos_data, print_config)
-        elif mode == "USB":
-            _print_via_usb(escpos_data, print_config)
-        else:
-            raise ValueError(f"Unknown print mode: {mode}")
+        _send_escpos(escpos_data, mode, print_config)
 
         # Decrement paper counter on success
         await _decrement_paper_counter(printer_id)

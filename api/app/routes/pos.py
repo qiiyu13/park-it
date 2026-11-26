@@ -120,8 +120,9 @@ async def get_shift_summary(
     except (TypeError, ValueError):
         operator_id_int = None
 
+    # fee, not paid_amount: paid_amount is the cash handed over, change included.
     cash_q = select(
-        func.coalesce(func.sum(ParkingTransaction.paid_amount), 0),
+        func.coalesce(func.sum(ParkingTransaction.fee), 0),
         func.count(ParkingTransaction.id),
     ).where(
         ParkingTransaction.exit_time >= today_start,

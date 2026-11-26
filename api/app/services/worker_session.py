@@ -3,11 +3,12 @@
 from datetime import UTC, date, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.models.gate import Gate
 from api.app.models.operator_alert import OperatorAlert
+from api.app.models.parking_transaction import ParkingTransaction
 from api.app.models.shift_assignment import ShiftAssignment
 from api.app.models.user import User
 from api.app.models.worker_session import WorkerSession
@@ -136,6 +137,77 @@ async def check_in(
     await db.refresh(session)
     logger.info("worker_checked_in", session_id=session.id, worker_id=worker_id, gate_id=gate_id)
     return session
+
+
+async def session_summary(db: AsyncSession, session: WorkerSession) -> dict:
+    """Takings at the session's exit gate between check-in and handover.
+
+    Transactions carry the login user, not the worker who entered a PIN, so the
+    session is matched by gate and time window instead. The window closes at
+    the outgoing confirmation (or force-leave), else now for a live preview.
+    Amounts use the fee, not paid_amount: paid_amount includes the change.
+    """
+    from zoneinfo import ZoneInfo
+
+    from shared.config import get_settings
+
+    closed_at = session.outgoing_confirmed_at or session.ended_at or _now()
+    rows = await db.execute(
+        select(
+            ParkingTransaction.payment_method,
+            func.count(ParkingTransaction.id),
+            func.coalesce(func.sum(ParkingTransaction.fee), 0),
+        )
+        .where(
+            ParkingTransaction.gate_out_id == session.gate_id,
+            ParkingTransaction.status == "COMPLETED",
+            ParkingTransaction.exit_time >= session.started_at,
+            ParkingTransaction.exit_time < closed_at,
+        )
+        .group_by(ParkingTransaction.payment_method)
+    )
+    by_method = {
+        (method or "LAINNYA"): {"count": int(count), "amount": int(amount)}
+        for method, count, amount in rows.all()
+    }
+    tz = ZoneInfo(get_settings().app_timezone)
+    gate = await db.get(Gate, session.gate_id)
+    worker = await db.get(User, session.worker_id)
+    return {
+        "session_id": session.id,
+        "worker_name": (worker.full_name or worker.username) if worker else "",
+        "gate_code": gate.code if gate else "",
+        "gate_name": gate.name if gate else "",
+        "shift_name": session.shift.name if session.shift else "",
+        "started_at": session.started_at.astimezone(tz).isoformat(),
+        "closed_at": closed_at.astimezone(tz).isoformat(),
+        "by_method": by_method,
+        "cash_amount": by_method.get("CASH", {}).get("amount", 0),
+        "total_amount": sum(m["amount"] for m in by_method.values()),
+        "total_count": sum(m["count"] for m in by_method.values()),
+    }
+
+
+async def enqueue_shift_slip(db: AsyncSession, session: WorkerSession) -> None:
+    """Print the closing slip on the gate's receipt printer (best effort)."""
+    try:
+        summary = await session_summary(db, session)
+        gate = await db.get(Gate, session.gate_id)
+        if gate is None or not gate.is_peripheral_enabled("receipt_printer"):
+            logger.info("shift_slip_skipped_no_printer", session_id=session.id)
+            return
+        from shared.redis import get_arq_redis
+
+        arq_redis = await get_arq_redis()
+        await arq_redis.enqueue_job(
+            "print_shift_slip",
+            gate_id=gate.code,
+            summary=summary,
+            _job_id=f"shift-slip:{session.id}",
+        )
+        logger.info("shift_slip_enqueued", session_id=session.id, gate_id=gate.code)
+    except Exception as exc:  # a printer problem must never block the handover
+        logger.error("shift_slip_enqueue_failed", session_id=session.id, error=str(exc))
 
 
 async def confirm_outgoing(

@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +61,19 @@ async def list_worker_sessions(
     return [WorkerSessionResponse.model_validate(s) for s in sessions]
 
 
+@router.get("/{session_id}/summary")
+async def get_session_summary(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_operator),
+) -> dict:
+    """Takings for this session (Tunai / E-Money / Member), shown before handover."""
+    session = await db.get(WorkerSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return await svc.session_summary(db, session)
+
+
 @router.post("/check-in", response_model=WorkerSessionResponse, status_code=status.HTTP_201_CREATED)
 async def check_in(
     data: CheckInRequest,
@@ -95,6 +108,7 @@ async def confirm_outgoing(
         end_type=data.end_type,
         end_reason=data.end_reason,
     )
+    await svc.enqueue_shift_slip(db, session)
     return WorkerSessionResponse.model_validate(session)
 
 
@@ -125,10 +139,14 @@ async def force_leave(
     current_user: dict = Depends(require_operator),
 ) -> WorkerSessionResponse:
     """Outgoing force-leaves after no-show incoming. Fires admin alert, booth goes uncovered."""
+    existing = await db.get(WorkerSession, session_id)
+    slip_printed = existing is not None and existing.status == "PENDING_HANDOVER"
     session = await svc.force_leave(
         db,
         session_id=session_id,
         pin=data.pin,
         reason=data.reason,
     )
+    if not slip_printed:  # leaving straight from ACTIVE: no slip was printed yet
+        await svc.enqueue_shift_slip(db, session)
     return WorkerSessionResponse.model_validate(session)
