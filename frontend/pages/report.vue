@@ -63,6 +63,31 @@
       />
     </div>
 
+    <!-- Per exit booth tab (Compass "Laporan Penerimaan Uang Parkir") -->
+    <div v-if="activeTab === 'exit-gate'">
+      <div class="mb-4 flex flex-wrap items-center gap-3">
+        <select v-model="exitGateId" class="form-control w-auto" @change="loadExitGateReport">
+          <option :value="null">Semua pos keluar</option>
+          <option v-for="g in exitGates" :key="g.id" :value="g.id">{{ g.name }} ({{ g.code }})</option>
+        </select>
+        <Button size="sm" variant="outline" :disabled="!exitGateReport?.items?.length" @click="printExitGateReport">Cetak</Button>
+      </div>
+      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div v-for="card in exitGateCards" :key="card.label" class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
+          <p class="text-xs font-semibold text-muted-foreground">{{ card.label }}</p>
+          <p class="text-xl font-semibold text-foreground">{{ card.value }}</p>
+        </div>
+      </div>
+      <DataTable
+        :data="exitGateReport?.items ?? []"
+        :columns="exitGateColumns"
+        :loading="loading"
+        :show-add="false"
+        :show-edit="false"
+        :show-delete="false"
+      />
+    </div>
+
     <!-- E-Money tab -->
     <div v-if="activeTab === 'emoney'">
       <div v-if="emoneyReport" class="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -92,16 +117,21 @@ const { formatCurrency } = useFormatters()
 const tabs = [
   { key: 'summary', label: 'Ringkasan' },
   { key: 'shift', label: 'Per Shift' },
+  { key: 'exit-gate', label: 'Per Pos Keluar' },
   { key: 'emoney', label: 'E-Money' },
 ]
 
 const activeTab = ref('summary')
 const loading = ref(false)
 
+// Calendar day in the browser's timezone; toISOString() is UTC and gave
+// yesterday's date before 07:00 WIB.
+function localDay(d) { return d.toLocaleDateString('en-CA') }
+
 const today = new Date()
 const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-const dateFrom = ref(firstDayOfMonth.toISOString().split('T')[0])
-const dateTo = ref(today.toISOString().split('T')[0])
+const dateFrom = ref(localDay(firstDayOfMonth))
+const dateTo = ref(localDay(today))
 
 const summaryReport = ref(null)
 const emoneyReport = ref(null)
@@ -120,7 +150,63 @@ const shiftReportColumns = [
   { prop: 'average_fee', label: 'Rata-rata', width: 120, formatter: rupiah },
 ]
 
-onMounted(() => { loadReports() })
+const METHOD_LABELS = { CASH: 'Tunai', EMONEY: 'E-Money', RFID_MEMBER: 'Member' }
+const exitGates = ref([])
+const exitGateId = ref(null)
+const exitGateReport = ref(null)
+const exitGateColumns = [
+  { prop: 'no', label: 'No', width: 60 },
+  { prop: 'barcode', label: 'Tiket', width: 150 },
+  { prop: 'plate_number', label: 'Plat', width: 110, formatter: (v) => v || '-' },
+  { prop: 'exit_time', label: 'Jam Keluar', width: 170, sortable: true, formatter: (v) => v ? new Date(v).toLocaleString('id-ID') : '-' },
+  { prop: 'gate_name', label: 'Pos Keluar', width: 140 },
+  { prop: 'operator_name', label: 'Petugas', width: 140, formatter: (v) => v || '-' },
+  { prop: 'vehicle_type', label: 'Tarif', width: 100, formatter: (v) => v || '-' },
+  { prop: 'payment_method', label: 'Bayar', width: 100, formatter: (v) => METHOD_LABELS[v] || v },
+  { prop: 'fee', label: 'Penerimaan', width: 130, sortable: true, formatter: rupiah },
+]
+const exitGateCards = computed(() => {
+  const r = exitGateReport.value
+  const by = r?.by_method || {}
+  return [
+    { label: 'Total Penerimaan', value: rupiah(r?.total_amount) },
+    { label: `Tunai`, value: rupiah(by.CASH) },
+    { label: 'E-Money', value: rupiah(by.EMONEY) },
+    { label: 'Jumlah Tiket', value: (r?.total_count ?? 0).toLocaleString('id-ID') },
+  ]
+})
+
+async function loadExitGateReport() {
+  const qs = new URLSearchParams({ date_from: dateFrom.value, date_to: dateTo.value })
+  if (exitGateId.value) qs.set('gate_out_id', exitGateId.value)
+  try {
+    exitGateReport.value = await fetchApi(`/api/reports/exit-gate?${qs}`)
+  } catch (err) {
+    toast.error(`Gagal memuat laporan pos keluar: ${err.message}`)
+  }
+}
+
+// Printable copy in its own window, so the sidebar and filters stay off paper.
+function printExitGateReport() {
+  const r = exitGateReport.value
+  const gate = exitGates.value.find((g) => g.id === exitGateId.value)
+  const esc = (v) => String(v ?? '-').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+  const rows = r.items.map((i) => `<tr><td>${i.no}</td><td>${esc(i.barcode)}</td><td>${esc(i.plate_number)}</td><td>${esc(new Date(i.exit_time).toLocaleString('id-ID'))}</td><td>${esc(i.gate_name)}</td><td>${esc(i.operator_name)}</td><td>${esc(i.vehicle_type)}</td><td>${esc(METHOD_LABELS[i.payment_method] || i.payment_method)}</td><td class="r">${rupiah(i.fee)}</td></tr>`).join('')
+  const w = window.open('', '_blank')
+  if (!w) { toast.error('Popup diblokir browser — izinkan popup untuk mencetak'); return }
+  w.document.write(`<!doctype html><title>Laporan Penerimaan Uang Parkir</title><style>body{font:12px sans-serif;margin:24px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #ccc;padding:4px;text-align:left}.r{text-align:right}tfoot td{font-weight:bold;border-top:2px solid #000}</style>
+<h2>LAPORAN PENERIMAAN UANG PARKIR</h2><p>Tanggal: ${esc(dateFrom.value)} s/d ${esc(dateTo.value)}<br>Pos: ${esc(gate ? gate.name : 'Semua pos keluar')}</p>
+<table><thead><tr><th>No</th><th>Tiket</th><th>Plat</th><th>Jam Keluar</th><th>Pos</th><th>Petugas</th><th>Tarif</th><th>Bayar</th><th class="r">Penerimaan</th></tr></thead><tbody>${rows}</tbody>
+<tfoot><tr><td colspan="8">Total Penerimaan (${r.total_count} tiket)</td><td class="r">${rupiah(r.total_amount)}</td></tr></tfoot></table>`)
+  w.document.close()
+  w.focus()
+  w.print()
+}
+
+onMounted(async () => {
+  loadReports()
+  try { exitGates.value = await fetchApi('/api/gates?direction=OUT') } catch { exitGates.value = [] }
+})
 
 async function loadReports() {
   if (!dateFrom.value || !dateTo.value) return
@@ -135,6 +221,7 @@ async function loadReports() {
     summaryReport.value = summary
     emoneyReport.value = emoney
     shiftReport.value = shift
+    await loadExitGateReport()
   } catch (err) {
     toast.error(`Gagal memuat laporan: ${err.message}`)
   } finally {
@@ -142,10 +229,10 @@ async function loadReports() {
   }
 }
 
-function setToday() { const d = new Date().toISOString().split('T')[0]; dateFrom.value = d; dateTo.value = d; loadReports() }
-function setThisWeek() { const now = new Date(); const mon = new Date(now.setDate(now.getDate() - now.getDay() + 1)); dateFrom.value = mon.toISOString().split('T')[0]; dateTo.value = new Date().toISOString().split('T')[0]; loadReports() }
-function setThisMonth() { const now = new Date(); dateFrom.value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]; dateTo.value = new Date().toISOString().split('T')[0]; loadReports() }
-function setLastMonth() { const now = new Date(); dateFrom.value = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]; dateTo.value = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]; loadReports() }
+function setToday() { const d = localDay(new Date()); dateFrom.value = d; dateTo.value = d; loadReports() }
+function setThisWeek() { const now = new Date(); const mon = new Date(now.setDate(now.getDate() - now.getDay() + 1)); dateFrom.value = localDay(mon); dateTo.value = localDay(new Date()); loadReports() }
+function setThisMonth() { const now = new Date(); dateFrom.value = localDay(new Date(now.getFullYear(), now.getMonth(), 1)); dateTo.value = localDay(new Date()); loadReports() }
+function setLastMonth() { const now = new Date(); dateFrom.value = localDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)); dateTo.value = localDay(new Date(now.getFullYear(), now.getMonth(), 0)); loadReports() }
 
 async function exportReport(format) {
   try {

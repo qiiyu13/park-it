@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import require_admin
 from api.app.models.emoney_transaction import EmoneyTransaction
+from api.app.models.gate import Gate
 from api.app.models.parking_transaction import ParkingTransaction
 from api.app.models.shift import Shift
 from api.app.models.site_config import SiteConfig
 from api.app.models.user import User
+from api.app.models.vehicle_type import VehicleType
 from api.app.schemas.report import EmoneyReport, ShiftReport, ShiftReportItem, SummaryReport
 from api.app.services.report_export import (
     export_summary_csv,
@@ -186,7 +188,13 @@ async def get_shift_report(
 ) -> ShiftReport:
     """Get parking shift report for date range (both dates inclusive)."""
     tz_name = get_settings().app_timezone
-    local_day = func.date(func.timezone(tz_name, ParkingTransaction.entry_time))
+    # Money is taken at exit: a car in at 23:00 and paid at 01:00 belongs to
+    # the payment day. Unpaid (ACTIVE) rows have no exit_time yet.
+    local_day = func.date(
+        func.timezone(
+            tz_name, func.coalesce(ParkingTransaction.exit_time, ParkingTransaction.entry_time)
+        )
+    )
 
     query = select(
         Shift.id.label("shift_id"),
@@ -262,6 +270,65 @@ async def get_shift_report(
         total_revenue=total_revenue,
         total_transactions=total_transactions,
     )
+
+
+@router.get("/exit-gate")
+async def get_exit_gate_report(
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    gate_out_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
+) -> dict:
+    """Paid tickets per exit booth (Compass "Laporan Penerimaan Uang Parkir").
+
+    One row per completed transaction, by local payment (exit) day, with totals
+    per payment method.
+    """
+    start, end = _local_bounds(date_from, date_to)
+    query = (
+        select(
+            ParkingTransaction,
+            Gate.name.label("gate_name"),
+            func.coalesce(User.full_name, User.username).label("operator_name"),
+            VehicleType.name.label("vehicle_type"),
+        )
+        .outerjoin(Gate, Gate.id == ParkingTransaction.gate_out_id)
+        .outerjoin(User, User.id == ParkingTransaction.operator_id)
+        .outerjoin(VehicleType, VehicleType.id == ParkingTransaction.vehicle_type_id)
+        .where(
+            ParkingTransaction.status == "COMPLETED",
+            ParkingTransaction.exit_time >= start,
+            ParkingTransaction.exit_time < end,
+        )
+        .order_by(ParkingTransaction.exit_time, ParkingTransaction.id)
+    )
+    if gate_out_id is not None:
+        query = query.where(ParkingTransaction.gate_out_id == gate_out_id)
+
+    items: list[dict] = []
+    by_method: dict[str, int] = {}
+    for tx, gate_name, operator_name, vehicle_type in (await db.execute(query)).all():
+        fee = tx.fee or 0
+        method = tx.payment_method or "LAINNYA"
+        by_method[method] = by_method.get(method, 0) + fee
+        items.append({
+            "no": len(items) + 1,
+            "barcode": tx.barcode,
+            "plate_number": tx.plate_number,
+            "exit_time": tx.exit_time,
+            "gate_name": gate_name,
+            "operator_name": operator_name,
+            "vehicle_type": vehicle_type,
+            "payment_method": method,
+            "fee": fee,
+        })
+    return {
+        "items": items,
+        "total_count": len(items),
+        "total_amount": sum(by_method.values()),
+        "by_method": by_method,
+    }
 
 
 @router.get("/summary/daily", response_model=SummaryReport)
