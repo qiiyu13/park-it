@@ -206,6 +206,7 @@ def create_app() -> FastAPI:
         health,
         manual_open_logs,
         members,
+        operator_alerts,
         payments,
         pos,
         printers,
@@ -249,6 +250,7 @@ def create_app() -> FastAPI:
     app.include_router(settlements.router, prefix="/api")
     app.include_router(audit_logs.router, prefix="/api")
     app.include_router(printers.router, prefix="/api")
+    app.include_router(operator_alerts.router, prefix="/api")
     app.include_router(snapshots.router, prefix="/api")
     app.include_router(setup.router, prefix="/api")
 

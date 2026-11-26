@@ -104,13 +104,6 @@
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg>
           </button>
-          <button
-            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-            title="Uji buka/tutup (end-to-end)"
-            @click="openGateTest(row)"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-          </button>
         </template>
       </DataTable>
     </div>
@@ -124,27 +117,15 @@
     <div v-if="activeTab === 'cameras'">
       <DataTable :data="cameras" :columns="cameraColumns" :loading="loadingCameras" @add="openCameraModal()" @edit="openCameraModal" @delete="confirmDeleteCamera">
         <template #row-actions="{ row }">
-          <div class="relative">
-            <button
-              class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-              title="Menu"
-              @click.stop="toggleRowMenu('camera', row.id)"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
-            </button>
-            <div
-              v-if="rowMenu === `camera-${row.id}`"
-              class="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-md border border-border bg-surface shadow-lg"
-            >
-              <button
-                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:opacity-50"
-                :disabled="testingCameraId === row.id"
-                @click="testCameraRow(row)"
-              >
-                {{ testingCameraId === row.id ? 'Menguji…' : 'Test Kamera' }}
-              </button>
-            </div>
-          </div>
+          <!-- Direct button: a dropdown here was clipped on the last table row. -->
+          <button
+            class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+            title="Test Kamera"
+            :disabled="testingCameraId === row.id"
+            @click="testCameraRow(row)"
+          >
+            {{ testingCameraId === row.id ? 'Menguji…' : 'Test Kamera' }}
+          </button>
         </template>
       </DataTable>
     </div>
@@ -153,27 +134,15 @@
     <div v-if="activeTab === 'printers'">
       <DataTable :data="printers" :columns="printerColumns" :loading="loadingPrinters" @add="openPrinterModal()" @edit="openPrinterModal" @delete="confirmDeletePrinter">
         <template #row-actions="{ row }">
-          <div class="relative">
-            <button
-              class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-              title="Menu"
-              @click.stop="toggleRowMenu('printer', row.id)"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
-            </button>
-            <div
-              v-if="rowMenu === `printer-${row.id}`"
-              class="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-md border border-border bg-surface shadow-lg"
-            >
-              <button
-                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:opacity-50"
-                :disabled="testingPrinterId === row.id"
-                @click="testPrinterRow(row)"
-              >
-                {{ testingPrinterId === row.id ? 'Menguji…' : 'Test Print' }}
-              </button>
-            </div>
-          </div>
+          <!-- Direct button: a dropdown here was clipped on the last table row. -->
+          <button
+            class="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+            title="Test Print"
+            :disabled="testingPrinterId === row.id"
+            @click="testPrinterRow(row)"
+          >
+            {{ testingPrinterId === row.id ? 'Menguji…' : 'Test Print' }}
+          </button>
         </template>
       </DataTable>
     </div>
@@ -224,23 +193,6 @@
     </div>
 
     <!-- End-to-end gate open/close test (software → daemon → controller ACK). -->
-    <Dialog :open="gateTestVisible" @update:open="(v) => { if (!v) gateTestVisible = false }">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Uji buka/tutup — {{ gateTestTarget?.name }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-xs text-muted-foreground">
-          Perintah buka dikirim ke daemon via Redis lalu menunggu ACK dari controller.
-          Konfirmasi seluruh jalur software → hardware bekerja.
-        </p>
-        <GateTestButton
-          v-if="gateTestTarget"
-          :key="gateTestTarget.id"
-          :gate-id="gateTestTarget.id"
-          :gate-code="gateTestTarget.code"
-        />
-      </DialogContent>
-    </Dialog>
 
     <!-- Modals (keep Element Plus based CrudModal) -->
     <CrudModal v-model="gateModalVisible" :title="gateEditing ? 'Edit Gate' : 'Tambah Gate'" :fields="gateFields" :initial-data="gateForm" :submitting="submitting" @submit="saveGate" />
@@ -269,7 +221,6 @@
 import GateStatusCard from '~/components/dashboard/GateStatusCard.vue'
 import StatusPill from '~/components/setup/StatusPill.vue'
 import DeviceProbeRow from '~/components/setup/DeviceProbeRow.vue'
-import GateTestButton from '~/components/setup/GateTestButton.vue'
 import GateLogDialog from '~/components/device/GateLogDialog.vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/components/ui/dialog'
 
@@ -312,10 +263,6 @@ const lastSymlink = ref('')
 function onUdevWritten(symlink) { lastSymlink.value = symlink }
 watch(serialRole, () => { lastSymlink.value = ''; serialDevice.value = ''; serialBaudrate.value = 9600 })
 
-// End-to-end gate open/close test (distinct from the connection probe in testGate).
-const gateTestVisible = ref(false)
-const gateTestTarget = ref(null)
-function openGateTest(gate) { gateTestTarget.value = gate; gateTestVisible.value = true }
 
 // Enable the gate-in daemon for a lane added after installation.
 const enablingGateId = ref(null)
@@ -339,11 +286,6 @@ const logDialogVisible = ref(false)
 const logTarget = ref(null)
 function openGateLog(gate) { logTarget.value = gate; logDialogVisible.value = true }
 
-// Three-dot row menu (camera / printer test).
-const rowMenu = ref(null)
-function toggleRowMenu(kind, id) {
-  rowMenu.value = rowMenu.value === `${kind}-${id}` ? null : `${kind}-${id}`
-}
 
 // Camera snapshot test (server proxies the RTSP frame).
 const testingCameraId = ref(null)
@@ -353,7 +295,6 @@ const cameraTestError = ref('')
 const cameraTestImage = ref('')
 const cameraTestName = ref('')
 async function testCameraRow(camera) {
-  rowMenu.value = null
   testingCameraId.value = camera.id
   cameraTestName.value = camera.name
   cameraTestVisible.value = true
@@ -376,7 +317,6 @@ async function testCameraRow(camera) {
 // Printer test (server picks the transport that answers).
 const testingPrinterId = ref(null)
 async function testPrinterRow(printer) {
-  rowMenu.value = null
   testingPrinterId.value = printer.id
   const { toast } = await import('vue-sonner')
   try {

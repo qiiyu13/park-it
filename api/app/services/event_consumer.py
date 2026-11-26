@@ -368,9 +368,49 @@ class EventConsumer:
                 logger.error("rfid_card_read_error", gate_id=gate_code, error=str(e))
 
     async def _handle_help_button_pressed(self, payload: dict) -> None:
-        """Operator assistance requested at gate."""
-        gate_id = payload.get("gate_id", "")
-        logger.warning("help_button_pressed", gate_id=gate_id)
+        """Help button at an entry gate: open one HELP_REQUEST alert for the POS.
+
+        Repeat presses while a call is still open add nothing, so the POS shows
+        one banner per gate until an operator marks it handled.
+        """
+        from sqlalchemy import select
+
+        from api.app.models import Gate
+        from api.app.models.operator_alert import OperatorAlert
+        from api.database import AsyncSessionLocal
+
+        gate_code = payload.get("gate_id", "")
+        logger.warning("help_button_pressed", gate_id=gate_code)
+        async with AsyncSessionLocal() as db:
+            try:
+                gate = (
+                    await db.execute(select(Gate).where(Gate.code == gate_code))
+                ).scalar_one_or_none()
+                if gate is None:
+                    logger.error("help_button_gate_not_found", gate_id=gate_code)
+                    return
+                open_call = (
+                    await db.execute(
+                        select(OperatorAlert.id).where(
+                            OperatorAlert.gate_id == gate.id,
+                            OperatorAlert.alert_type == "HELP_REQUEST",
+                            OperatorAlert.is_resolved == False,  # noqa: E712
+                        ).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if open_call is not None:
+                    return
+                db.add(
+                    OperatorAlert(
+                        gate_type=gate.direction.lower(),
+                        gate_id=gate.id,
+                        alert_type="HELP_REQUEST",
+                        message=f"{gate.name} ({gate.code}) membutuhkan bantuan",
+                    )
+                )
+                await db.commit()
+            except Exception as e:
+                logger.error("help_button_error", gate_id=gate_code, error=str(e))
 
     async def _handle_vehicle_detected(self, payload: dict) -> None:
         """Handle vehicle_detected event — logged for monitoring."""

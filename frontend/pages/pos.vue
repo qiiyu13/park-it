@@ -41,6 +41,26 @@
       </div>
     </div>
 
+    <!-- Help button at an entry gate: blinking red banner on every POS, as in Compass. -->
+    <div
+      v-if="helpCalls.length"
+      class="pointer-events-none fixed inset-x-0 top-20 z-50 flex flex-col items-center gap-2 px-4"
+      role="alert"
+    >
+      <div
+        v-for="call in helpCalls"
+        :key="call.id"
+        class="pointer-events-auto flex w-full max-w-2xl items-center justify-between gap-4 rounded-lg bg-destructive px-4 py-3 text-white shadow-lg"
+      >
+        <span class="animate-pulse text-lg font-bold tracking-tight">
+          {{ call.gate_name || call.gate_code }} MEMBUTUHKAN BANTUAN
+        </span>
+        <Button variant="outline" class="shrink-0 bg-surface text-foreground" @click="resolveHelpCall(call)">
+          Ditangani
+        </Button>
+      </div>
+    </div>
+
     <!-- Main: State-driven single-column layout -->
     <div :class="['h-full overflow-hidden', timeoutBorderClass]">
       <!-- GATE_OPEN: awaiting gate open after payment -->
@@ -219,12 +239,37 @@ async function pollEntryGates() {
     // advisory only — keep the last known value
   }
 }
+
+// Help-button calls from entry gates. Polled (Compass checked every 5 s) so a
+// WebSocket drop or page reload never hides one; beeps until someone handles it.
+const helpCalls = ref([])
+let helpTimer = null
+async function pollHelpCalls() {
+  try {
+    helpCalls.value = (await fetchApi('/api/operator-alerts/help')) || []
+    if (helpCalls.value.length) sound.timeoutAlert()
+  } catch {
+    // advisory only — keep the last known value
+  }
+}
+async function resolveHelpCall(call) {
+  try {
+    await fetchApi(`/api/operator-alerts/${call.id}/resolve`, { method: 'POST' })
+    helpCalls.value = helpCalls.value.filter((c) => c.id !== call.id)
+  } catch (err) {
+    toast.error(`Gagal menandai bantuan: ${err?.data?.detail || err.message}`)
+  }
+}
+
 onMounted(() => {
   pollEntryGates()
   entryGateTimer = setInterval(pollEntryGates, 30_000)
+  pollHelpCalls()
+  helpTimer = setInterval(pollHelpCalls, 3_000)
 })
 onBeforeUnmount(() => {
   if (entryGateTimer) clearInterval(entryGateTimer)
+  if (helpTimer) clearInterval(helpTimer)
 })
 const { detectCardType, maskCardNumber } = useFormatters()
 
