@@ -89,7 +89,6 @@ async function load() {
 
 const items = computed(() => {
   const s = state.value
-  const workersWithPin = s.workers.filter((w) => w.worker_pin)
   const gatesWithController = s.gates.filter(
     (g) => g.controller_host || g.controller_device
   )
@@ -104,10 +103,10 @@ const items = computed(() => {
     },
     {
       key: 'personnel',
-      label: 'Petugas + PIN',
-      ok: workersWithPin.length > 0,
-      okText: `${workersWithPin.length} petugas siap`,
-      hint: 'Tambah personil dan set PIN 4 digit',
+      label: 'Petugas',
+      ok: s.workers.length > 0,
+      okText: `${s.workers.length} petugas siap`,
+      hint: 'Tambah personil (role operator)',
       to: '/personnel',
     },
     {

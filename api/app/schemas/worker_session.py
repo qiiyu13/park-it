@@ -38,12 +38,6 @@ class ForceLeaveRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=255)
 
 
-class SetWorkerPinRequest(BaseModel):
-    """Admin sets a worker's 4-digit PIN."""
-
-    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
-
-
 class WorkerSessionResponse(BaseModel):
     """Worker session response."""
 

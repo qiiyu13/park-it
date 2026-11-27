@@ -1,6 +1,6 @@
 <template>
   <div>
-    <PageHeader title="Personil" subtitle="Manajemen akun pengguna dan PIN shift.">
+    <PageHeader title="Personil" subtitle="Manajemen akun pengguna.">
       <template #action>
         <Button size="sm" @click="openCreate">+ Tambah Pengguna</Button>
       </template>
@@ -16,13 +16,12 @@
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">Username</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-            <th class="px-4 py-3 text-left font-medium text-muted-foreground">PIN</th>
             <th class="px-4 py-3 text-left font-medium text-muted-foreground w-32">Aksi</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="users.length === 0">
-            <td colspan="6" class="py-8 text-center text-muted-foreground">Tidak ada pengguna</td>
+            <td colspan="5" class="py-8 text-center text-muted-foreground">Tidak ada pengguna</td>
           </tr>
           <tr
             v-for="user in users"
@@ -43,46 +42,6 @@
               <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', user.is_active ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground']">
                 {{ user.is_active ? 'Aktif' : 'Nonaktif' }}
               </span>
-            </td>
-            <td class="px-4 py-3">
-              <div v-if="pinEditingId === user.id" class="flex items-center gap-2">
-                <input
-                  v-model="pinValue"
-                  type="password"
-                  inputmode="numeric"
-                  maxlength="4"
-                  placeholder="••••"
-                  class="form-control h-8 w-20 px-2 text-center font-mono"
-                  @keydown.enter="savePin(user.id)"
-                  @keydown.escape="cancelPinEdit"
-                >
-                <button
-                  :disabled="pinValue.length < 4 || savingPin"
-                  class="rounded bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-40"
-                  @click="savePin(user.id)"
-                >
-                  {{ savingPin ? '...' : 'Simpan' }}
-                </button>
-                <button class="text-xs text-muted-foreground hover:text-foreground" @click="cancelPinEdit">Batal</button>
-              </div>
-              <div v-else class="flex items-center gap-2">
-                <span :class="['text-xs', user.worker_pin ? 'text-success' : 'text-muted-foreground/50']">
-                  {{ user.worker_pin ? '●●●●' : 'Belum diset' }}
-                </span>
-                <button
-                  class="text-xs text-primary hover:underline"
-                  @click="startPinEdit(user)"
-                >
-                  {{ user.worker_pin ? 'Ubah' : 'Set PIN' }}
-                </button>
-                <button
-                  v-if="user.worker_pin"
-                  class="text-xs text-destructive hover:underline"
-                  @click="removePin(user)"
-                >
-                  Hapus
-                </button>
-              </div>
             </td>
             <td class="px-4 py-3">
               <div class="flex items-center gap-2">
@@ -192,11 +151,6 @@ const savingUser = ref(false)
 const modalError = ref('')
 const form = ref({ username: '', full_name: '', role: 'operator', password: '', phone: '', is_active: true })
 
-// PIN inline edit
-const pinEditingId = ref(null)
-const pinValue = ref('')
-const savingPin = ref(false)
-
 // Confirm dialog (replaces native confirm())
 const confirmVisible = ref(false)
 const confirmTitle = ref('')
@@ -290,48 +244,6 @@ function deleteUser(user) {
       toast.success(`Pengguna ${user.username} dihapus`)
     } catch (err) {
       toast.error(err.message || 'Gagal menghapus pengguna')
-      throw err
-    }
-  })
-}
-
-// PIN management
-function startPinEdit(user) {
-  pinEditingId.value = user.id
-  pinValue.value = ''
-}
-
-function cancelPinEdit() {
-  pinEditingId.value = null
-  pinValue.value = ''
-}
-
-async function savePin(userId) {
-  if (pinValue.value.length < 4) return
-  savingPin.value = true
-  try {
-    await fetchApi(`/api/users/${userId}/set-pin`, {
-      method: 'POST',
-      body: JSON.stringify({ pin: pinValue.value }),
-    })
-    cancelPinEdit()
-    await loadUsers()
-    toast.success('PIN tersimpan')
-  } catch (err) {
-    toast.error(err.message || 'Gagal menyimpan PIN')
-  } finally {
-    savingPin.value = false
-  }
-}
-
-function removePin(user) {
-  askConfirm('Hapus PIN', `Hapus PIN ${user.full_name || user.username}?`, async () => {
-    try {
-      await fetchApi(`/api/users/${user.id}/pin`, { method: 'DELETE' })
-      await loadUsers()
-      toast.success('PIN dihapus')
-    } catch (err) {
-      toast.error(err.message || 'Gagal menghapus PIN')
       throw err
     }
   })
