@@ -742,6 +742,9 @@ const printerColumns = [
   { prop: 'koneksi', label: 'Koneksi', width: 160, formatter: (_, row) => {
     if (row.mode === 'NETWORK') return `${row.ip_address || '-'}:${row.port || 9100}`
     if (row.mode === 'SERIAL') return `${row.serial_device || '-'} @ ${row.baudrate}`
+    if (row.mode === 'USB') return row.serial_device || '-'
+    if (row.mode === 'BOOTH') return `PC booth · ${row.serial_device || 'printer booth'}`
+    if (row.mode === 'AUTO') return 'Otomatis'
     return 'Controller'
   }},
   { prop: 'is_active', label: 'Aktif', type: 'boolean', width: 80 },

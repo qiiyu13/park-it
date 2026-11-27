@@ -41,21 +41,23 @@
       </div>
     </div>
 
-    <!-- Help button at an entry gate: blinking red banner on every POS, as in Compass. -->
+    <!-- Help button at an entry gate: blinking red banner on every POS, as in
+         Compass. It sits in the empty middle of the top bar so it never covers
+         the plate/ticket fields the operator is typing into. -->
     <div
       v-if="helpCalls.length"
-      class="pointer-events-none fixed inset-x-0 top-20 z-50 flex flex-col items-center gap-2 px-4"
+      class="pointer-events-none fixed inset-x-0 top-2 z-50 flex flex-col items-center gap-1 px-4"
       role="alert"
     >
       <div
         v-for="call in helpCalls"
         :key="call.id"
-        class="pointer-events-auto flex w-full max-w-2xl items-center justify-between gap-4 rounded-lg bg-destructive px-4 py-3 text-white shadow-lg"
+        class="pointer-events-auto flex w-full max-w-xl items-center justify-between gap-3 rounded-md bg-destructive px-3 py-1.5 text-white shadow-lg"
       >
-        <span class="animate-pulse text-lg font-bold tracking-tight">
+        <span class="animate-pulse truncate text-base font-bold tracking-tight">
           {{ call.gate_name || call.gate_code }} MEMBUTUHKAN BANTUAN
         </span>
-        <Button variant="outline" class="shrink-0 bg-surface text-foreground" @click="resolveHelpCall(call)">
+        <Button size="sm" variant="outline" class="shrink-0 bg-surface text-foreground" @click="resolveHelpCall(call)">
           Ditangani
         </Button>
       </div>
