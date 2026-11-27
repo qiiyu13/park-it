@@ -13,7 +13,6 @@ from api.app.models.shift_assignment import ShiftAssignment
 from api.app.models.user import User
 from api.app.models.worker_session import WorkerSession
 from api.app.services.shift_utils import get_current_shift
-from api.app.utils.password import verify_password
 from shared.logging import get_logger
 
 logger = get_logger("worker_session_service")
@@ -27,19 +26,11 @@ def _today() -> date:
     return _now().date()
 
 
-async def _get_worker_and_verify_pin(db: AsyncSession, worker_id: int, pin: str) -> User:
-    """Fetch worker and verify PIN. Raises 401 on mismatch, 404 if not found."""
+async def _get_worker(db: AsyncSession, worker_id: int) -> User:
+    """Fetch an active worker. No PIN: the client picks workers by name only."""
     worker = await db.get(User, worker_id)
     if worker is None or not worker.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Petugas tidak ditemukan atau nonaktif — periksa menu Personil")
-    if not worker.worker_pin:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Petugas ini belum punya PIN — buka Personil, set PIN 4 digit",
-        )
-    if not verify_password(pin, worker.worker_pin):
-        logger.warning("worker_pin_mismatch", worker_id=worker_id)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="PIN salah — coba lagi atau minta admin reset PIN di menu Personil")
     return worker
 
 
@@ -65,22 +56,19 @@ async def check_in(
     db: AsyncSession,
     gate_id: int,
     worker_id: int,
-    pin: str,
     shift_assignment_id: int | None = None,
     is_substitute: bool = False,
     original_worker_id: int | None = None,
 ) -> WorkerSession:
     """Worker checks in at a gate. Creates new WorkerSession with status=ACTIVE.
 
-    Validates: no conflicting active session, PIN correct, gate exists, shift found.
+    Validates: no conflicting active session, worker active, gate exists, shift found.
     """
     gate = await db.get(Gate, gate_id)
     if gate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
 
-    # Verifies the PIN as a side effect (raises on mismatch); the worker row
-    # itself isn't needed here since worker_id is already known.
-    await _get_worker_and_verify_pin(db, worker_id, pin)
+    await _get_worker(db, worker_id)
 
     existing = await _get_active_session(db, gate_id)
     if existing is not None and existing.status == "ACTIVE":
@@ -213,7 +201,6 @@ async def enqueue_shift_slip(db: AsyncSession, session: WorkerSession) -> None:
 async def confirm_outgoing(
     db: AsyncSession,
     session_id: int,
-    pin: str,
     end_type: str = "SCHEDULED",
     end_reason: str | None = None,
 ) -> WorkerSession:
@@ -227,7 +214,7 @@ async def confirm_outgoing(
             detail=f"Session is {session.status}, must be ACTIVE",
         )
 
-    await _get_worker_and_verify_pin(db, session.worker_id, pin)
+    await _get_worker(db, session.worker_id)
 
     now = _now()
     session.outgoing_confirmed_at = now
@@ -250,7 +237,6 @@ async def confirm_incoming(
     db: AsyncSession,
     pending_session_id: int,
     worker_id: int,
-    pin: str,
     is_substitute: bool = False,
     original_worker_id: int | None = None,
 ) -> WorkerSession:
@@ -264,7 +250,7 @@ async def confirm_incoming(
             detail=f"Session is {pending.status}, must be PENDING_HANDOVER",
         )
 
-    await _get_worker_and_verify_pin(db, worker_id, pin)
+    await _get_worker(db, worker_id)
 
     now = _now()
 
@@ -303,7 +289,6 @@ async def confirm_incoming(
 async def force_leave(
     db: AsyncSession,
     session_id: int,
-    pin: str,
     reason: str,
 ) -> WorkerSession:
     """Outgoing force-leaves after no-show incoming. Ends session, fires admin alert."""
@@ -316,7 +301,7 @@ async def force_leave(
             detail=f"Session is {session.status}, cannot force-leave",
         )
 
-    await _get_worker_and_verify_pin(db, session.worker_id, pin)
+    await _get_worker(db, session.worker_id)
 
     gate = await db.get(Gate, session.gate_id)
     gate_direction = gate.direction.lower() if gate else "out"

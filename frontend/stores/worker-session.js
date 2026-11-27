@@ -58,7 +58,7 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
     }
   }
 
-  async function checkIn({ gateId, workerId, pin, shiftAssignmentId = null, isSubstitute = false, originalWorkerId = null }) {
+  async function checkIn({ gateId, workerId, shiftAssignmentId = null, isSubstitute = false, originalWorkerId = null }) {
     isLoading.value = true
     error.value = null
     try {
@@ -68,7 +68,6 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
         body: JSON.stringify({
           gate_id: gateId,
           worker_id: workerId,
-          pin,
           shift_assignment_id: shiftAssignmentId,
           is_substitute: isSubstitute,
           original_worker_id: originalWorkerId,
@@ -84,14 +83,14 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
     }
   }
 
-  async function confirmOutgoing({ sessionId, pin, endType = 'SCHEDULED', endReason = null }) {
+  async function confirmOutgoing({ sessionId, endType = 'SCHEDULED', endReason = null }) {
     isLoading.value = true
     error.value = null
     try {
       const { fetchApi } = useApi()
       const session = await fetchApi(`/api/worker-sessions/${sessionId}/confirm-outgoing`, {
         method: 'POST',
-        body: JSON.stringify({ pin, end_type: endType, end_reason: endReason }),
+        body: JSON.stringify({ end_type: endType, end_reason: endReason }),
       })
       activeSession.value = session
       return session
@@ -103,7 +102,7 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
     }
   }
 
-  async function confirmIncoming({ sessionId, workerId, pin, isSubstitute = false, originalWorkerId = null }) {
+  async function confirmIncoming({ sessionId, workerId, isSubstitute = false, originalWorkerId = null }) {
     isLoading.value = true
     error.value = null
     try {
@@ -112,7 +111,6 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
         method: 'POST',
         body: JSON.stringify({
           worker_id: workerId,
-          pin,
           is_substitute: isSubstitute,
           original_worker_id: originalWorkerId,
         }),
@@ -127,14 +125,14 @@ export const useWorkerSessionStore = defineStore('worker-session', () => {
     }
   }
 
-  async function forceLeave({ sessionId, pin, reason }) {
+  async function forceLeave({ sessionId, reason }) {
     isLoading.value = true
     error.value = null
     try {
       const { fetchApi } = useApi()
       const session = await fetchApi(`/api/worker-sessions/${sessionId}/force-leave`, {
         method: 'POST',
-        body: JSON.stringify({ pin, reason }),
+        body: JSON.stringify({ reason }),
       })
       activeSession.value = null  // booth is now uncovered
       return session

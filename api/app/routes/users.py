@@ -28,14 +28,16 @@ async def list_workers(
     current_user: dict = Depends(require_operator),
 ) -> list[UserResponse]:
     """List active workers (operator/supervisor/admin) for shift handover picker."""
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from api.app.models.user import User
 
     result = await db.execute(
         select(User)
         .where(User.is_active.is_(True))
-        .where(User.worker_pin.isnot(None))
+        # No PIN any more: operators/supervisors are workers; a PIN still marks
+        # an admin account that also works shifts.
+        .where(or_(User.role.in_(("operator", "supervisor")), User.worker_pin.isnot(None)))
         .order_by(User.full_name)
     )
     users = result.scalars().all()

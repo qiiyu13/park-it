@@ -45,7 +45,7 @@ async def site(db_session: AsyncSession, monkeypatch):
     db_session.add_all([gate, other_gate, worker, shift])
     await db_session.commit()
 
-    session = await svc.check_in(db_session, gate_id=gate.id, worker_id=worker.id, pin=PIN)
+    session = await svc.check_in(db_session, gate_id=gate.id, worker_id=worker.id)
     session.started_at = datetime.now(UTC) - timedelta(hours=2)
     now = datetime.now(UTC)
 
@@ -98,7 +98,7 @@ async def test_summary_counts_fee_for_this_booth_and_window(site):
 async def test_handover_prints_one_slip(site):
     client, session, arq = site
     response = await client.post(
-        f"/api/worker-sessions/{session.id}/confirm-outgoing", json={"pin": PIN}
+        f"/api/worker-sessions/{session.id}/confirm-outgoing", json={}
     )
     assert response.status_code == 200
     assert [(name, kw["gate_id"], kw["summary"]["cash_amount"]) for name, kw in arq.jobs] == [
@@ -107,7 +107,7 @@ async def test_handover_prints_one_slip(site):
 
     # Force-leave after the outgoing step must not print a second slip.
     response = await client.post(
-        f"/api/worker-sessions/{session.id}/force-leave", json={"pin": PIN, "reason": "sakit"}
+        f"/api/worker-sessions/{session.id}/force-leave", json={"reason": "sakit"}
     )
     assert response.status_code == 200
     assert len(arq.jobs) == 1
@@ -116,7 +116,7 @@ async def test_handover_prints_one_slip(site):
 async def test_force_leave_from_active_prints_slip(site):
     client, session, arq = site
     response = await client.post(
-        f"/api/worker-sessions/{session.id}/force-leave", json={"pin": PIN, "reason": "sakit"}
+        f"/api/worker-sessions/{session.id}/force-leave", json={"reason": "sakit"}
     )
     assert response.status_code == 200
     assert [name for name, _ in arq.jobs] == ["print_shift_slip"]

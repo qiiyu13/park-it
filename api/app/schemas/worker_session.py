@@ -12,7 +12,6 @@ class CheckInRequest(BaseModel):
 
     gate_id: int
     worker_id: int
-    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
     shift_assignment_id: int | None = None
     is_substitute: bool = False
     original_worker_id: int | None = None
@@ -21,7 +20,6 @@ class CheckInRequest(BaseModel):
 class ConfirmOutgoingRequest(BaseModel):
     """Outgoing worker confirms they are leaving — step 1 of Option B handover."""
 
-    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
     end_type: str = Field(default="SCHEDULED", pattern=r"^(SCHEDULED|EARLY)$")
     end_reason: str | None = Field(None, max_length=255)
 
@@ -30,7 +28,6 @@ class ConfirmIncomingRequest(BaseModel):
     """Incoming worker confirms takeover — step 2 of Option B handover."""
 
     worker_id: int
-    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
     is_substitute: bool = False
     original_worker_id: int | None = None
 
@@ -38,7 +35,6 @@ class ConfirmIncomingRequest(BaseModel):
 class ForceLeaveRequest(BaseModel):
     """Force leave when incoming worker is a no-show after timeout."""
 
-    pin: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$")
     reason: str = Field(..., min_length=1, max_length=255)
 
 

@@ -32,7 +32,7 @@
           </div>
         </div>
 
-        <!-- Step 0: outgoing PIN -->
+        <!-- Step 0: outgoing -->
         <template v-if="internalStep === 'outgoing'">
           <div class="pos-choice p-4 mb-4">
             <div class="text-[11px]  tracking-widest pos-label text-muted-foreground">PETUGAS AKTIF</div>
@@ -54,17 +54,6 @@
             </template>
             <div v-else class="pos-body text-sm text-muted-foreground mt-1">{{ summaryError || 'Menghitung…' }}</div>
           </div>
-          <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-2">PIN ANDA</div>
-          <div class="flex gap-2 mb-4">
-            <div
-v-for="i in 4" :key="i" class="pos-pin"
-              :class="{ 'is-filled': outgoingPin.length >= i, 'is-current': outgoingPin.length === i - 1 }">
-              {{ outgoingPin[i - 1] ? '•' : (outgoingPin.length === i - 1 ? '|' : '') }}
-            </div>
-            <input
-ref="outgoingPinInput" v-model="outgoingPin" type="password" inputmode="numeric"
-              maxlength="4" class="sr-only" @keydown.enter="submitOutgoing" >
-          </div>
 
           <div v-if="earlyLeave" class="mb-4">
             <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-1">ALASAN PERGI LEBIH AWAL</div>
@@ -74,7 +63,7 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
           </div>
         </template>
 
-        <!-- Step 1: incoming worker + PIN -->
+        <!-- Step 1: incoming worker -->
         <template v-else-if="internalStep === 'pending'">
           <div class="pos-choice is-active p-3 mb-4">
             <div class="flex items-center gap-2">
@@ -82,7 +71,7 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
               <span class="ml-auto text-success">✓</span>
             </div>
             <div class="pos-display text-lg leading-tight">
-              {{ currentWorker?.full_name || currentWorker?.username }} keluar shift · PIN diverifikasi
+              {{ currentWorker?.full_name || currentWorker?.username }} keluar shift
             </div>
             <div v-if="summary" class="pos-body text-xs text-muted-foreground">tutup kas: Rp {{ formatRp(summary.cash_amount) }} tunai · {{ summary.total_count }} transaksi · slip laporan dicetak</div>
           </div>
@@ -94,7 +83,7 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
               :key="w.id"
               class="pos-choice px-3 py-2.5 text-left"
               :class="{ 'is-active': incomingWorker?.id === w.id }"
-              @click="incomingWorker = w; focusIncomingPin()"
+              @click="incomingWorker = w"
             >
               <div class="pos-display text-lg leading-none truncate">{{ w.full_name || w.username }}</div>
               <div class="text-xs pos-label text-muted-foreground truncate">{{ w.shift_name || w.role }}</div>
@@ -104,21 +93,6 @@ v-model="endReason" type="text" maxlength="255" placeholder="Isi alasan..."
             </div>
           </div>
 
-          <div v-if="incomingWorker">
-            <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-2">
-              PIN {{ (incomingWorker.full_name || incomingWorker.username).toUpperCase() }}
-            </div>
-            <div class="flex gap-2 mb-4">
-              <div
-v-for="i in 4" :key="i" class="pos-pin"
-                :class="{ 'is-filled': incomingPin.length >= i, 'is-current': incomingPin.length === i - 1 }">
-                {{ incomingPin[i - 1] ? '•' : (incomingPin.length === i - 1 ? '|' : '') }}
-              </div>
-              <input
-ref="incomingPinInput" v-model="incomingPin" type="password" inputmode="numeric"
-                maxlength="4" class="sr-only" @keydown.enter="submitIncoming" >
-            </div>
-          </div>
         </template>
 
         <!-- Step 2: force-leave -->
@@ -133,19 +107,6 @@ v-model="forceLeaveReason" type="text" maxlength="255"
               placeholder="darurat keluarga, sakit mendadak..."
               class="pos-input w-full px-3 py-2 pos-body" >
           </div>
-          <div class="mb-4">
-            <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-1">KONFIRMASI PIN ANDA</div>
-            <div class="flex gap-2">
-              <div
-v-for="i in 4" :key="i" class="pos-pin"
-                :class="{ 'is-filled': forcePin.length >= i, 'is-current': forcePin.length === i - 1 }">
-                {{ forcePin[i - 1] ? '•' : (forcePin.length === i - 1 ? '|' : '') }}
-              </div>
-              <input
-ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
-                maxlength="4" class="sr-only" @keydown.enter="submitForceLeave" >
-            </div>
-          </div>
         </template>
 
         <!-- Error -->
@@ -156,7 +117,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
         <!-- Footer actions -->
         <div class="flex items-center justify-between mt-4">
           <div class="pos-body text-xs text-muted-foreground italic max-w-md">
-            <template v-if="internalStep === 'outgoing'">setelah PIN, slip laporan penerimaan dicetak → serahkan uang ke petugas masuk</template>
+            <template v-if="internalStep === 'outgoing'">setelah Lanjut, slip laporan penerimaan dicetak → serahkan uang ke petugas masuk</template>
             <template v-else-if="internalStep === 'pending'">petugas pengganti harus konfirmasi sebelum Anda boleh meninggalkan pos</template>
             <template v-else>tindakan ini dicatat audit</template>
           </div>
@@ -170,7 +131,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
             <button
               v-if="internalStep === 'outgoing'"
               class="pos-btn is-primary"
-              :disabled="outgoingPin.length < 4 || isLoading"
+              :disabled="isLoading"
               @click="submitOutgoing"
             >
               <span class="pos-key mr-1 px-1.5 py-0">Enter</span> LANJUT →
@@ -178,7 +139,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
             <button
               v-else-if="internalStep === 'pending'"
               class="pos-btn is-go"
-              :disabled="!incomingWorker || incomingPin.length < 4 || isLoading"
+              :disabled="!incomingWorker || isLoading"
               @click="submitIncoming"
             >
               <span class="pos-key mr-1 px-1.5 py-0">Enter</span> SERAH TERIMA →
@@ -186,7 +147,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
             <button
               v-else
               class="pos-btn is-danger"
-              :disabled="forcePin.length < 4 || !forceLeaveReason.trim() || isLoading"
+              :disabled="!forceLeaveReason.trim() || isLoading"
               @click="submitForceLeave"
             >
               <span class="pos-key mr-1 px-1.5 py-0">Enter</span> TINGGALKAN POS →
@@ -198,7 +159,6 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
         <div class="mt-6 flex items-center justify-between pt-3 border-t border-dashed border-border">
           <div class="flex items-center gap-3 pos-body text-xs text-muted-foreground">
             <span><span class="pos-key px-1.5 py-0">1–9</span> Pilih petugas masuk</span>
-            <span><span class="pos-key px-1.5 py-0">0–9</span> PIN</span>
             <span><span class="pos-key px-1.5 py-0">Enter</span> Lanjut</span>
             <span><span class="pos-key px-1.5 py-0">Esc</span> Batal</span>
           </div>
@@ -213,7 +173,7 @@ ref="forcePinInput" v-model="forcePin" type="password" inputmode="numeric"
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   sessionId: { type: Number, required: true },
@@ -226,12 +186,9 @@ const props = defineProps({
 const emit = defineEmits(['confirm-outgoing', 'confirm-incoming', 'force-leave', 'cancel'])
 
 const internalStep = ref(props.initialStep)
-const outgoingPin = ref('')
 const endReason = ref('')
 const incomingWorker = ref(null)
-const incomingPin = ref('')
 const forceLeaveReason = ref('')
-const forcePin = ref('')
 const errorMsg = ref('')
 
 // Takings for this session; the server closes the window at handover.
@@ -257,10 +214,6 @@ const methodRows = computed(() => {
   ]
 })
 
-const outgoingPinInput = ref(null)
-const incomingPinInput = ref(null)
-const forcePinInput = ref(null)
-
 const availableWorkers = computed(() =>
   props.workers.filter(w => w.id !== props.currentWorker?.id)
 )
@@ -284,73 +237,59 @@ function stepClass(i) {
 function formatRp(v) {
   return Number(v || 0).toLocaleString('id-ID')
 }
-function focusIncomingPin() {
-  incomingPin.value = ''
-  nextTick(() => incomingPinInput.value?.focus())
-}
 
 watch(() => props.initialStep, (val) => { internalStep.value = val })
-watch(internalStep, async (val) => {
-  errorMsg.value = ''
-  await nextTick()
-  if (val === 'outgoing') outgoingPinInput.value?.focus()
-  else if (val === 'pending') incomingPinInput.value?.focus()
-  else if (val === 'force') forcePinInput.value?.focus()
-})
+watch(internalStep, () => { errorMsg.value = '' })
 
 function onKey(e) {
-  if (internalStep.value === 'pending' && !incomingWorker.value && /^[1-9]$/.test(e.key)) {
+  const typing = e.target?.tagName === 'INPUT'
+  if (internalStep.value === 'pending' && !typing && /^[1-9]$/.test(e.key)) {
     const idx = parseInt(e.key, 10) - 1
     if (availableWorkers.value[idx]) {
       incomingWorker.value = availableWorkers.value[idx]
-      focusIncomingPin()
       e.preventDefault()
     }
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (internalStep.value === 'outgoing') submitOutgoing()
+    else if (internalStep.value === 'pending') submitIncoming()
+    else submitForceLeave()
   }
 }
 onMounted(() => {
   loadSummary()
   window.addEventListener('keydown', onKey)
-  nextTick(() => outgoingPinInput.value?.focus())
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 async function submitOutgoing() {
-  if (outgoingPin.value.length < 4 || props.isLoading) return
+  if (props.isLoading) return
   errorMsg.value = ''
   emit('confirm-outgoing', {
     sessionId: props.sessionId,
-    pin: outgoingPin.value,
     endType: props.earlyLeave ? 'EARLY' : 'SCHEDULED',
     endReason: endReason.value || null,
   })
 }
 async function submitIncoming() {
-  if (!incomingWorker.value || incomingPin.value.length < 4 || props.isLoading) return
+  if (!incomingWorker.value || props.isLoading) return
   errorMsg.value = ''
   emit('confirm-incoming', {
     sessionId: props.sessionId,
     workerId: incomingWorker.value.id,
-    pin: incomingPin.value,
   })
 }
 async function submitForceLeave() {
-  if (forcePin.value.length < 4 || !forceLeaveReason.value.trim() || props.isLoading) return
+  if (!forceLeaveReason.value.trim() || props.isLoading) return
   errorMsg.value = ''
   emit('force-leave', {
     sessionId: props.sessionId,
-    pin: forcePin.value,
     reason: forceLeaveReason.value.trim(),
   })
 }
 
 defineExpose({
-  setError: (m) => {
-    errorMsg.value = m
-    outgoingPin.value = ''
-    incomingPin.value = ''
-    forcePin.value = ''
-  },
+  setError: (m) => { errorMsg.value = m },
   // Emit can't report failure, so the parent advances only after the API succeeds.
   advanceToPending: () => { internalStep.value = 'pending'; loadSummary() },
 })

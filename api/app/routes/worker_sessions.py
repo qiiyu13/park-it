@@ -85,7 +85,6 @@ async def check_in(
         db,
         gate_id=data.gate_id,
         worker_id=data.worker_id,
-        pin=data.pin,
         shift_assignment_id=data.shift_assignment_id,
         is_substitute=data.is_substitute,
         original_worker_id=data.original_worker_id,
@@ -104,7 +103,6 @@ async def confirm_outgoing(
     session = await svc.confirm_outgoing(
         db,
         session_id=session_id,
-        pin=data.pin,
         end_type=data.end_type,
         end_reason=data.end_reason,
     )
@@ -124,7 +122,6 @@ async def confirm_incoming(
         db,
         pending_session_id=session_id,
         worker_id=data.worker_id,
-        pin=data.pin,
         is_substitute=data.is_substitute,
         original_worker_id=data.original_worker_id,
     )
@@ -144,7 +141,6 @@ async def force_leave(
     session = await svc.force_leave(
         db,
         session_id=session_id,
-        pin=data.pin,
         reason=data.reason,
     )
     if not slip_printed:  # leaving straight from ACTIVE: no slip was printed yet

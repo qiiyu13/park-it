@@ -1094,7 +1094,6 @@ function onWorkerBadgeClick() {
 }
 
 function workerErrorText(err) {
-  if (err.status === 401) return 'PIN salah — coba lagi atau minta admin reset PIN'
   const msg = err?.data?.detail || err.message || 'Gagal memproses'
   // Actionable hints for the two most common blockers.
   if (/shift aktif|No active shift/i.test(msg)) {

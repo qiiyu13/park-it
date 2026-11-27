@@ -70,7 +70,7 @@ async def _check_in(db: AsyncSession, gate: Gate, worker: User, **kwargs):
     if await db.scalar(select(Shift.id).limit(1)) is None:
         await _shift(db)
     return await svc.check_in(
-        db, gate_id=gate.id, worker_id=worker.id, pin=kwargs.pop("pin", PIN), **kwargs
+        db, gate_id=gate.id, worker_id=worker.id, **kwargs
     )
 
 
@@ -102,7 +102,6 @@ class TestCheckIn:
             db_session,
             gate_id=gate.id,
             worker_id=worker.id,
-            pin=PIN,
             shift_assignment_id=assignment.id,
         )
 
@@ -124,32 +123,18 @@ class TestCheckIn:
             db_session,
             gate_id=gate.id,
             worker_id=worker.id,
-            pin=PIN,
             is_substitute=True,
             original_worker_id=original.id,
         )
         assert session.status == "ACTIVE"
         assert session.is_substitute is True
 
-    async def test_wrong_pin_rejected(self, db_session: AsyncSession):
-        worker = await _worker(db_session)
-        gate = await _gate(db_session)
-
-        with pytest.raises(HTTPException) as exc:
-            await svc.check_in(
-                db_session, gate_id=gate.id, worker_id=worker.id, pin="9999"
-            )
-        assert exc.value.status_code == 401
-
-    async def test_worker_without_pin_rejected(self, db_session: AsyncSession):
+    async def test_worker_without_pin_checks_in(self, db_session: AsyncSession):
         worker = await _worker(db_session, pin=None)
         gate = await _gate(db_session)
 
-        with pytest.raises(HTTPException) as exc:
-            await svc.check_in(
-                db_session, gate_id=gate.id, worker_id=worker.id, pin=PIN
-            )
-        assert exc.value.status_code == 400
+        session = await _check_in(db_session, gate, worker)
+        assert session.status == "ACTIVE"
 
     async def test_assignment_for_another_gate_rejected(
         self, db_session: AsyncSession
@@ -167,7 +152,6 @@ class TestCheckIn:
                 db_session,
                 gate_id=gate.id,
                 worker_id=worker.id,
-                pin=PIN,
                 shift_assignment_id=assignment.id,
             )
         assert exc.value.status_code == 400
@@ -180,7 +164,7 @@ class TestCheckIn:
         await _check_in(db_session, gate, first)
         with pytest.raises(HTTPException) as exc:
             await svc.check_in(
-                db_session, gate_id=gate.id, worker_id=second.id, pin=PIN
+                db_session, gate_id=gate.id, worker_id=second.id
             )
         assert exc.value.status_code == 409
 
@@ -193,7 +177,7 @@ class TestHandover:
 
         session = await _check_in(db_session, gate, outgoing)
         pending = await svc.confirm_outgoing(
-            db_session, session_id=session.id, pin=PIN, end_type="SCHEDULED"
+            db_session, session_id=session.id, end_type="SCHEDULED"
         )
         assert pending.status == "PENDING_HANDOVER"
 
@@ -201,7 +185,6 @@ class TestHandover:
             db_session,
             pending_session_id=pending.id,
             worker_id=incoming.id,
-            pin=PIN,
         )
 
         await db_session.refresh(pending)
@@ -220,26 +203,15 @@ class TestHandover:
 
         session = await _check_in(db_session, gate, outgoing)
         await svc.confirm_outgoing(
-            db_session, session_id=session.id, pin=PIN, end_type="EARLY"
+            db_session, session_id=session.id, end_type="EARLY"
         )
 
         with pytest.raises(HTTPException) as exc:
             await svc.check_in(
-                db_session, gate_id=gate.id, worker_id=incoming.id, pin=PIN
+                db_session, gate_id=gate.id, worker_id=incoming.id
             )
         assert exc.value.status_code == 409
         assert "confirm-incoming" in exc.value.detail
-
-    async def test_outgoing_wrong_pin_rejected(self, db_session: AsyncSession):
-        worker = await _worker(db_session)
-        gate = await _gate(db_session)
-        session = await _check_in(db_session, gate, worker)
-
-        with pytest.raises(HTTPException) as exc:
-            await svc.confirm_outgoing(
-                db_session, session_id=session.id, pin="9999"
-            )
-        assert exc.value.status_code == 401
 
     async def test_takeover_requires_pending_state(self, db_session: AsyncSession):
         worker = await _worker(db_session)
@@ -252,7 +224,6 @@ class TestHandover:
                 db_session,
                 pending_session_id=session.id,
                 worker_id=incoming.id,
-                pin=PIN,
             )
         assert exc.value.status_code == 409
 
@@ -264,7 +235,7 @@ class TestForceLeave:
         session = await _check_in(db_session, gate, worker)
 
         completed = await svc.force_leave(
-            db_session, session_id=session.id, pin=PIN, reason="incoming no-show"
+            db_session, session_id=session.id, reason="incoming no-show"
         )
 
         assert completed.status == "COMPLETED"
@@ -281,17 +252,6 @@ class TestForceLeave:
         assert alert.gate_id == gate.id
         assert "uncovered" in alert.message.lower()
 
-    async def test_force_leave_wrong_pin_rejected(self, db_session: AsyncSession):
-        worker = await _worker(db_session)
-        gate = await _gate(db_session)
-        session = await _check_in(db_session, gate, worker)
-
-        with pytest.raises(HTTPException) as exc:
-            await svc.force_leave(
-                db_session, session_id=session.id, pin="9999", reason="x"
-            )
-        assert exc.value.status_code == 401
-
     async def test_completed_session_cannot_be_force_left(
         self, db_session: AsyncSession
     ):
@@ -299,17 +259,16 @@ class TestForceLeave:
         gate = await _gate(db_session)
         session = await _check_in(db_session, gate, worker)
         await svc.confirm_outgoing(
-            db_session, session_id=session.id, pin=PIN, end_type="SCHEDULED"
+            db_session, session_id=session.id, end_type="SCHEDULED"
         )
         await svc.confirm_incoming(
             db_session,
             pending_session_id=session.id,
             worker_id=(await _worker(db_session)).id,
-            pin=PIN,
         )
 
         with pytest.raises(HTTPException) as exc:
             await svc.force_leave(
-                db_session, session_id=session.id, pin=PIN, reason="x"
+                db_session, session_id=session.id, reason="x"
             )
         assert exc.value.status_code == 409

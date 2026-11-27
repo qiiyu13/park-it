@@ -5,7 +5,7 @@
         <!-- Header -->
         <div class="text-xs  tracking-[0.2em] pos-label text-muted-foreground">BLOCKING · SEBELUM TRANSAKSI</div>
         <h2 class="pos-display text-4xl mt-1 leading-none">Belum ada petugas</h2>
-        <p class="pos-body text-sm text-muted-foreground mt-2">pilih nama Anda lalu masukkan PIN untuk mulai shift.</p>
+        <p class="pos-body text-sm text-muted-foreground mt-2">pilih nama Anda untuk mulai shift.</p>
         <div class="pos-divider my-4"/>
 
         <!-- Worker tiles -->
@@ -22,38 +22,11 @@
             <div class="text-xs pos-label text-muted-foreground truncate">{{ workerSub(worker) }}</div>
           </button>
           <div v-if="!workers.length" class="col-span-5 py-6 text-center pos-body text-sm text-muted-foreground">
-            Tidak ada petugas aktif — hubungi admin untuk mengatur PIN.
+            Tidak ada petugas aktif — tambahkan di menu Personil.
           </div>
         </div>
 
-        <!-- PIN boxes -->
-        <div class="text-[11px]  tracking-widest pos-label text-muted-foreground mb-2">PIN · 4 ANGKA</div>
-        <div class="flex items-end gap-5 mb-5">
-          <div class="flex gap-2">
-            <div
-              v-for="i in 4"
-              :key="i"
-              class="pos-pin"
-              :class="{
-                'is-filled': pin.length >= i,
-                'is-current': pin.length === i - 1 && selectedWorker
-              }"
-            >{{ pin[i - 1] ? '•' : (pin.length === i - 1 && selectedWorker ? '|' : '') }}</div>
-          </div>
-          <input
-            ref="pinInput"
-            v-model="pin"
-            type="password"
-            inputmode="numeric"
-            maxlength="4"
-            class="sr-only"
-            @keydown.enter="submit"
-          >
-          <div class="ml-auto text-xs pos-body text-muted-foreground">
-            <span v-if="errorMsg" class="text-destructive">{{ errorMsg }}</span>
-            <span v-else>salah PIN? hubungi supervisor</span>
-          </div>
-        </div>
+        <div v-if="errorMsg" class="pos-body text-sm text-destructive mb-4">{{ errorMsg }}</div>
 
         <!-- Substitute toggle -->
         <div class="flex items-center gap-3 mb-4">
@@ -77,7 +50,7 @@
         <div class="flex items-center justify-end gap-2">
           <button
             class="pos-btn is-go"
-            :disabled="!selectedWorker || pin.length < 4 || isLoading"
+            :disabled="!selectedWorker || isLoading"
             @click="submit"
           >
             <span class="pos-key mr-1 px-1.5 py-0">Enter</span>
@@ -90,7 +63,6 @@
         <div class="mt-6 flex items-center justify-between pt-3 border-t border-dashed border-border">
           <div class="flex items-center gap-3 pos-body text-xs text-muted-foreground">
             <span><span class="pos-key px-1.5 py-0">1–{{ Math.min(workers.length, 9) }}</span> Pilih petugas</span>
-            <span><span class="pos-key px-1.5 py-0">0–9</span> PIN</span>
             <span><span class="pos-key px-1.5 py-0">Enter</span> Masuk Shift</span>
           </div>
           <div class="flex items-center gap-1 pos-body text-xs text-muted-foreground">
@@ -104,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   gateId: { type: Number, required: true },
@@ -114,59 +86,47 @@ const props = defineProps({
 const emit = defineEmits(['check-in'])
 
 const selectedWorker = ref(null)
-const pin = ref('')
 const errorMsg = ref('')
 const isSubstitute = ref(false)
 const originalWorkerId = ref(null)
-const pinInput = ref(null)
 
 function workerSub(w) {
   return w.shift_name || w.role || ''
 }
 function pickWorker(w) {
   selectedWorker.value = w
-  pin.value = ''
   errorMsg.value = ''
-  nextTick(() => pinInput.value?.focus())
 }
 
 function onKey(e) {
-  // Number 1..9 picks worker if PIN empty
-  if (!selectedWorker.value && /^[1-9]$/.test(e.key)) {
+  if (e.target?.tagName === 'SELECT') return
+  if (/^[1-9]$/.test(e.key)) {
     const idx = parseInt(e.key, 10) - 1
     if (props.workers[idx]) {
       pickWorker(props.workers[idx])
       e.preventDefault()
-      return
     }
-  }
-  // Focus PIN on numeric when worker selected
-  if (selectedWorker.value && /^[0-9]$/.test(e.key)) {
-    pinInput.value?.focus()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    submit()
   }
 }
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  nextTick(() => pinInput.value?.focus())
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
-watch(pin, (val) => {
-  if (val.length > 4) pin.value = val.slice(0, 4)
-})
-
 async function submit() {
-  if (!selectedWorker.value || pin.value.length < 4 || props.isLoading) return
+  if (!selectedWorker.value || props.isLoading) return
   errorMsg.value = ''
   emit('check-in', {
     gateId: props.gateId,
     workerId: selectedWorker.value.id,
-    pin: pin.value,
     isSubstitute: isSubstitute.value,
     originalWorkerId: isSubstitute.value ? originalWorkerId.value : null,
   })
 }
 
-defineExpose({ setError: (m) => { errorMsg.value = m; pin.value = '' } })
+defineExpose({ setError: (m) => { errorMsg.value = m } })
 </script>
