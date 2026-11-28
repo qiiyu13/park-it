@@ -17,7 +17,8 @@
             </div>
             <div :class="row">
               <label :class="lbl">[1/2/3] JENIS</label>
-              <select v-model="vehicleTypeId" :class="inp" @change="requote">
+              <select ref="typeSelect" v-model="vehicleTypeId" :class="inp" @change="requote">
+                <option :value="null" disabled>Pilih jenis…</option>
                 <option v-for="vt in vehicleTypes" :key="vt.id" :value="vt.id">{{ vt.name }}</option>
               </select>
             </div>
@@ -37,11 +38,11 @@
             </p>
             <div :class="row" class="mt-2">
               <label :class="lbl">TARIF</label>
-              <div :class="fare">{{ rp(quote?.tariff) }}</div>
+              <div :class="fare">{{ vehicleTypeId ? rp(quote?.tariff) : '—' }}</div>
             </div>
             <div :class="row">
               <label :class="lbl">TARIF + DENDA</label>
-              <div :class="fare" class="text-xl">{{ rp(quote?.total) }}</div>
+              <div :class="fare" class="text-xl">{{ vehicleTypeId ? rp(quote?.total) : '—' }}</div>
             </div>
           </div>
 
@@ -123,6 +124,7 @@ const quote = ref(null)
 const error = ref('')
 const saving = ref(false)
 const plateInput = ref(null)
+const typeSelect = ref(null)
 
 const matched = computed(() => !!quote.value?.matched)
 const canSubmit = computed(() =>
@@ -172,7 +174,8 @@ async function loadQuote() {
 watch(() => props.open, async (open) => {
   if (!open) return
   plate.value = (props.initialPlate || '').toUpperCase()
-  vehicleTypeId.value = props.defaultVehicleTypeId || props.vehicleTypes[0]?.id || null
+  // Mixed lane has no default: the operator must pick, like Compass.
+  vehicleTypeId.value = props.defaultVehicleTypeId || null
   entryLocal.value = ''
   gateInId.value = props.gateIns.length === 1 ? props.gateIns[0].id : null
   form.value = { driver_name: '', id_number: '', address: '', rt_rw: '', kelurahan: '', kecamatan: '', city: '', notes: '' }
@@ -180,13 +183,14 @@ watch(() => props.open, async (open) => {
   error.value = ''
   await loadQuote()
   await nextTick()
-  plateInput.value?.focus()
-  plateInput.value?.select()
+  // Plate already typed on the POS: go straight to JENIS so "2" picks Mobil.
+  if (plate.value.trim()) typeSelect.value?.focus()
+  else plateInput.value?.focus()
 }, { immediate: true })
 
 // 1/2/3 pick Motor/Mobil/Box like the POS, but never while typing in a field.
 function onKey(e) {
-  if (!props.open || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target?.tagName)) return
+  if (!props.open || ['INPUT', 'TEXTAREA'].includes(e.target?.tagName)) return
   const pattern = { 1: /motor/i, 2: /mobil|car/i, 3: /box|bus|truk/i }[e.key]
   const vt = pattern && props.vehicleTypes.find((t) => pattern.test(t.name))
   if (vt) {

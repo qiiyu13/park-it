@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.app.middleware.auth import require_operator
@@ -18,7 +18,6 @@ from api.app.models import Gate, LostTicketReport, ParkingTransaction, Setting
 from api.app.services.audit import log_action
 from api.app.services.transaction import (
     calculate_transaction_fee_parts,
-    find_active_transaction,
     lane_vehicle_type_id,
 )
 from api.database import get_db
@@ -73,10 +72,24 @@ def _plate(value: str | None) -> str | None:
 
 
 async def _matched(db: AsyncSession, plate: str | None, *, for_update: bool = False):
-    """Vehicle still parked under this plate (camera/RFID captured it at entry)."""
+    """Vehicle still parked under this plate (camera/RFID captured it at entry).
+
+    Stored plates keep the operator's spaces ("H 2205 RR"), so compare without them.
+    """
     if not plate:
         return None
-    return await find_active_transaction(db, plate_number=plate, for_update=for_update)
+    query = (
+        select(ParkingTransaction)
+        .where(
+            ParkingTransaction.status == "ACTIVE",
+            func.replace(func.upper(ParkingTransaction.plate_number), " ", "") == plate,
+        )
+        .order_by(ParkingTransaction.entry_time.desc())
+        .limit(1)
+    )
+    if for_update:
+        query = query.with_for_update()
+    return await db.scalar(query)
 
 
 async def _vehicle_type(db: AsyncSession, data: LostTicketQuoteRequest) -> int | None:

@@ -125,14 +125,14 @@ async def test_new_lost_ticket_is_paid_with_denda_added(site):
 async def test_plate_still_parked_reuses_that_ticket(site):
     client, db, _, gate_in, gate_out, mobil = site
     parked = ParkingTransaction(
-        barcode="55555", plate_number="H9999AB", gate_in_id=gate_in.id,
+        barcode="55555", plate_number="H 9999 AB", gate_in_id=gate_in.id,
         entry_time=datetime.now(UTC) - timedelta(hours=5), status="ACTIVE",
     )
     db.add(parked)
     await db.commit()
 
     quote = (await client.post("/api/lost-tickets/quote", json={
-        "plate_number": "H9999AB", "vehicle_type_id": mobil.id,
+        "plate_number": "h9999ab", "vehicle_type_id": mobil.id,
     })).json()
     assert quote["matched"] is True and quote["transaction_id"] == parked.id
 
