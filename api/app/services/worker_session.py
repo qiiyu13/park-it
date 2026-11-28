@@ -158,6 +158,23 @@ async def session_summary(db: AsyncSession, session: WorkerSession) -> dict:
         (method or "LAINNYA"): {"count": int(count), "amount": int(amount)}
         for method, count, amount in rows.all()
     }
+    from api.app.models import LostTicketReport
+
+    penalty_count, penalty_amount = (
+        await db.execute(
+            select(
+                func.count(LostTicketReport.id),
+                func.coalesce(func.sum(LostTicketReport.penalty_amount), 0),
+            )
+            .join(ParkingTransaction, ParkingTransaction.id == LostTicketReport.transaction_id)
+            .where(
+                ParkingTransaction.gate_out_id == session.gate_id,
+                ParkingTransaction.status == "COMPLETED",
+                ParkingTransaction.exit_time >= session.started_at,
+                ParkingTransaction.exit_time < closed_at,
+            )
+        )
+    ).one()
     tz = ZoneInfo(get_settings().app_timezone)
     gate = await db.get(Gate, session.gate_id)
     worker = await db.get(User, session.worker_id)
@@ -173,6 +190,9 @@ async def session_summary(db: AsyncSession, session: WorkerSession) -> dict:
         "cash_amount": by_method.get("CASH", {}).get("amount", 0),
         "total_amount": sum(m["amount"] for m in by_method.values()),
         "total_count": sum(m["count"] for m in by_method.values()),
+        # Compass slip: Pendapatan Parkir + Pendapatan Denda = Total.
+        "penalty_amount": int(penalty_amount),
+        "penalty_count": int(penalty_count),
     }
 
 

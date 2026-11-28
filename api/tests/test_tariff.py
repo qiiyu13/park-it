@@ -9,6 +9,7 @@ from api.app.services.tariff import (
     TariffConfig,
     VehicleTypeRate,
     calculate_tariff,
+    calculate_tariff_parts,
 )
 
 
@@ -162,8 +163,8 @@ class TestCalculateTariff:
         fee = calculate_tariff(entry, exit_, "MOBIL", config)
         assert fee == 20000  # 2 * 5000 + 1 * 10000
 
-    def test_lost_ticket_penalty_floor(self):
-        """Lost ticket charges at least the penalty, ignoring grace."""
+    def test_lost_ticket_penalty_added(self):
+        """Default: denda is added to the time fee, grace ignored."""
         config = TariffConfig(
             vehicle_types={
                 "MOBIL": VehicleTypeRate(
@@ -172,7 +173,28 @@ class TestCalculateTariff:
             }
         )
         entry = datetime(2026, 4, 25, 10, 0, 0)
+        exit_ = datetime(2026, 4, 25, 12, 5, 0)  # 3 started hours
+
+        assert calculate_tariff_parts(
+            entry, exit_, "MOBIL", config, is_lost_ticket=True
+        ) == (15000, 50000)
+        assert calculate_tariff(entry, exit_, "MOBIL", config, is_lost_ticket=True) == 65000
+        assert calculate_tariff(entry, exit_, "MOBIL", config) == 15000
+
+    def test_lost_ticket_penalty_floor(self):
+        """Minimum-fee mode: charge at least the denda; only the top-up is denda."""
+        config = TariffConfig(
+            vehicle_types={
+                "MOBIL": VehicleTypeRate(
+                    hourly_rate=5000, daily_cap=0, lost_ticket_penalty=50000
+                ),
+            },
+            lost_ticket_penalty_added=False,
+        )
+        entry = datetime(2026, 4, 25, 10, 0, 0)
         exit_ = datetime(2026, 4, 25, 10, 5, 0)  # within grace, but ticket lost
 
-        fee = calculate_tariff(entry, exit_, "MOBIL", config, is_lost_ticket=True)
-        assert fee == 50000
+        assert calculate_tariff_parts(
+            entry, exit_, "MOBIL", config, is_lost_ticket=True
+        ) == (5000, 45000)
+        assert calculate_tariff(entry, exit_, "MOBIL", config, is_lost_ticket=True) == 50000

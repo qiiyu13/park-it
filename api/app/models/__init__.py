@@ -11,6 +11,7 @@ from api.app.models.emoney_reader import EmoneyReader
 from api.app.models.emoney_settlement import EmoneySettlement
 from api.app.models.emoney_transaction import EmoneyTransaction
 from api.app.models.gate import Gate
+from api.app.models.lost_ticket_report import LostTicketReport
 from api.app.models.manual_open_log import ManualOpenLog
 from api.app.models.member import Member
 from api.app.models.operator_alert import OperatorAlert
@@ -36,6 +37,7 @@ __all__ = [
     "EmoneySettlement",
     "EmoneyTransaction",
     "Gate",
+    "LostTicketReport",
     "ManualOpenLog",
     "Member",
     "OperatorAlert",

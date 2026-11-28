@@ -72,7 +72,7 @@
         </select>
         <Button size="sm" variant="outline" :disabled="!exitGateReport?.items?.length" @click="printExitGateReport">Cetak</Button>
       </div>
-      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div v-for="card in exitGateCards" :key="card.label" class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
           <p class="text-xs font-semibold text-muted-foreground">{{ card.label }}</p>
           <p class="text-xl font-semibold text-foreground">{{ card.value }}</p>
@@ -81,6 +81,28 @@
       <DataTable
         :data="exitGateReport?.items ?? []"
         :columns="exitGateColumns"
+        :loading="loading"
+        :show-add="false"
+        :show-edit="false"
+        :show-delete="false"
+      />
+    </div>
+
+    <!-- Lost tickets (Compass "Denda Tiket Hilang"): identity kept for later checks -->
+    <div v-if="activeTab === 'lost'">
+      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
+          <p class="text-xs font-semibold text-muted-foreground">Karcis Hilang</p>
+          <p class="text-xl font-semibold text-foreground">{{ (lostReport?.total_count ?? 0).toLocaleString('id-ID') }}</p>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-3 shadow-brutal-sm">
+          <p class="text-xs font-semibold text-muted-foreground">Pendapatan Denda</p>
+          <p class="text-xl font-semibold text-foreground">{{ rupiah(lostReport?.total_penalty) }}</p>
+        </div>
+      </div>
+      <DataTable
+        :data="lostReport?.items ?? []"
+        :columns="lostColumns"
         :loading="loading"
         :show-add="false"
         :show-edit="false"
@@ -118,6 +140,7 @@ const tabs = [
   { key: 'summary', label: 'Ringkasan' },
   { key: 'shift', label: 'Per Shift' },
   { key: 'exit-gate', label: 'Per Pos Keluar' },
+  { key: 'lost', label: 'Karcis Hilang' },
   { key: 'emoney', label: 'E-Money' },
 ]
 
@@ -163,6 +186,7 @@ const exitGateColumns = [
   { prop: 'operator_name', label: 'Petugas', width: 140, formatter: (v) => v || '-' },
   { prop: 'vehicle_type', label: 'Tarif', width: 100, formatter: (v) => v || '-' },
   { prop: 'payment_method', label: 'Bayar', width: 100, formatter: (v) => METHOD_LABELS[v] || v },
+  { prop: 'penalty', label: 'Denda', width: 110, formatter: (v) => v ? rupiah(v) : '-' },
   { prop: 'fee', label: 'Penerimaan', width: 130, sortable: true, formatter: rupiah },
 ]
 const exitGateCards = computed(() => {
@@ -170,11 +194,29 @@ const exitGateCards = computed(() => {
   const by = r?.by_method || {}
   return [
     { label: 'Total Penerimaan', value: rupiah(r?.total_amount) },
+    { label: 'Pendapatan Parkir', value: rupiah(r?.total_tariff) },
+    { label: 'Pendapatan Denda', value: rupiah(r?.total_penalty) },
     { label: `Tunai`, value: rupiah(by.CASH) },
     { label: 'E-Money', value: rupiah(by.EMONEY) },
     { label: 'Jumlah Tiket', value: (r?.total_count ?? 0).toLocaleString('id-ID') },
   ]
 })
+
+const lostReport = ref(null)
+const dt = (v) => v ? new Date(v).toLocaleString('id-ID') : '-'
+const lostColumns = [
+  { prop: 'resi', label: 'No. Resi', width: 120 },
+  { prop: 'plate_number', label: 'Plat', width: 110 },
+  { prop: 'driver_name', label: 'Nama', width: 150 },
+  { prop: 'id_number', label: 'No. Identitas', width: 160 },
+  { prop: 'address', label: 'Alamat', width: 220, formatter: (v) => v || '-' },
+  { prop: 'entry_time', label: 'Jam Masuk', width: 160, formatter: dt },
+  { prop: 'exit_time', label: 'Jam Keluar', width: 160, formatter: dt },
+  { prop: 'gate_name', label: 'Pos Keluar', width: 130, formatter: (v) => v || '-' },
+  { prop: 'operator_name', label: 'Petugas', width: 130, formatter: (v) => v || '-' },
+  { prop: 'notes', label: 'Keterangan', width: 160, formatter: (v) => v || '-' },
+  { prop: 'penalty', label: 'Denda', width: 110, formatter: (v, row) => row.paid ? rupiah(v) : 'belum bayar' },
+]
 
 async function loadExitGateReport() {
   const qs = new URLSearchParams({ date_from: dateFrom.value, date_to: dateTo.value })
@@ -197,7 +239,7 @@ function printExitGateReport() {
   w.document.write(`<!doctype html><title>Laporan Penerimaan Uang Parkir</title><style>body{font:12px sans-serif;margin:24px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #ccc;padding:4px;text-align:left}.r{text-align:right}tfoot td{font-weight:bold;border-top:2px solid #000}</style>
 <h2>LAPORAN PENERIMAAN UANG PARKIR</h2><p>Tanggal: ${esc(dateFrom.value)} s/d ${esc(dateTo.value)}<br>Pos: ${esc(gate ? gate.name : 'Semua pos keluar')}</p>
 <table><thead><tr><th>No</th><th>Tiket</th><th>Plat</th><th>Jam Keluar</th><th>Pos</th><th>Petugas</th><th>Tarif</th><th>Bayar</th><th class="r">Penerimaan</th></tr></thead><tbody>${rows}</tbody>
-<tfoot><tr><td colspan="8">Total Penerimaan (${r.total_count} tiket)</td><td class="r">${rupiah(r.total_amount)}</td></tr></tfoot></table>`)
+<tfoot><tr><td colspan="8">Pendapatan Parkir</td><td class="r">${rupiah(r.total_tariff)}</td></tr><tr><td colspan="8">Pendapatan Denda</td><td class="r">${rupiah(r.total_penalty)}</td></tr><tr><td colspan="8">Total Penerimaan (${r.total_count} tiket)</td><td class="r">${rupiah(r.total_amount)}</td></tr></tfoot></table>`)
   w.document.close()
   w.focus()
   w.print()
@@ -222,6 +264,7 @@ async function loadReports() {
     emoneyReport.value = emoney
     shiftReport.value = shift
     await loadExitGateReport()
+    lostReport.value = await fetchApi(`/api/reports/lost-tickets?${qs}`).catch(() => null)
   } catch (err) {
     toast.error(`Gagal memuat laporan: ${err.message}`)
   } finally {

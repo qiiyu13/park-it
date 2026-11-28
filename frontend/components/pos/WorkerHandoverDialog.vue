@@ -51,6 +51,9 @@
                 <span class="pos-label text-sm">Uang tunai diserahkan</span>
                 <span class="pos-display text-2xl">Rp {{ formatRp(summary.cash_amount) }}</span>
               </div>
+              <div v-if="summary.penalty_amount" class="pos-body text-xs text-muted-foreground mt-1">
+                termasuk denda karcis hilang Rp {{ formatRp(summary.penalty_amount) }} ({{ summary.penalty_count }})
+              </div>
             </template>
             <div v-else class="pos-body text-sm text-muted-foreground mt-1">{{ summaryError || 'Menghitung…' }}</div>
           </div>

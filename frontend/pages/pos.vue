@@ -190,6 +190,17 @@
       @confirm="confirmRfidPayment"
     />
 
+    <!-- Lost ticket: "xxxxx" in the ticket box (Compass habit) -->
+    <PosLostTicketDialog
+      v-model:open="showLostTicket"
+      :initial-plate="pendingPlate"
+      :vehicle-types="websiteStore.vehicleTypes"
+      :gate-ins="websiteStore.activeGateIns"
+      :default-vehicle-type-id="activeVehicleTypeId"
+      :gate-out-id="selectedGate?.id ?? null"
+      @created="onLostTicketCreated"
+    />
+
     <!-- Manual gate open (supervisor/admin password) -->
     <PosManualOpenDialog
       v-model:open="showManualOpen"
@@ -202,7 +213,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { Button } from '~/components/ui/button'
 import { useKeyboard } from '~/composables/useKeyboard'
 import { useFormatters } from '~/composables/useFormatters'
@@ -329,6 +340,7 @@ const BOOTH_MAX_RECONNECT_ATTEMPTS = 10
 const showCashDialog = ref(false)
 const showRfidDialog = ref(false)
 const showManualOpen = ref(false)
+const showLostTicket = ref(false)
 const manualOpenLoading = ref(false)
 const manualOpenError = ref('')
 const boothPeripherals = ref({})
@@ -583,7 +595,8 @@ useKeyboard([
     showRfidDialog.value ||
     showCheckInDialog.value ||
     showHandoverDialog.value ||
-    showManualOpen.value,
+    showManualOpen.value ||
+    showLostTicket.value,
 })
 
 // Actions
@@ -618,6 +631,16 @@ async function onBarcodeLookup(input) {
   const v = input?.trim()
   if (!v) return
 
+  // Lost ticket: operators type "xxxxx" (any case) like on Compass.
+  if (/^x{5}$/i.test(v)) {
+    if (gateStore.currentTransaction) {
+      toast.warning('Selesaikan transaksi yang sedang berjalan dulu')
+      return
+    }
+    showLostTicket.value = true
+    return
+  }
+
   // USB RFID readers are keyboard wedges: the card number lands in the barcode
   // box. Numeric card -> close the member transaction and open the exit gate
   // straight away (no lookup screen).
@@ -631,6 +654,19 @@ async function onBarcodeLookup(input) {
 
   const found = await gateStore.lookupTransaction({ barcode: v })
   if (!found) toast.warning('Transaksi tidak ditemukan untuk barcode tersebut')
+}
+
+async function onLostTicketCreated({ barcode, vehicleTypeId, plate }) {
+  pendingPlate.value = plate
+  const found = await gateStore.lookupTransaction({ barcode })
+  if (!found) {
+    toast.error('Karcis hilang tersimpan, tapi transaksi tidak bisa dimuat — cari plat ' + plate)
+    return
+  }
+  // The transaction watcher resets a fixed lane to its default type; keep the
+  // operator's pick so the cash call prices the same type as the dialog.
+  await nextTick()
+  activeVehicleTypeId.value = vehicleTypeId
 }
 
 function onPlateEntered(value) {

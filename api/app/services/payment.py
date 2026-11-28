@@ -124,6 +124,21 @@ async def _receipt_context(db: AsyncSession, gate, transaction_data: dict) -> di
                 vt = await db.get(VehicleType, tx.vehicle_type_id)
                 if vt:
                     transaction_data.setdefault("vehicle_type", vt.name)
+            if tx.is_lost_ticket:
+                from api.app.models import LostTicketReport
+
+                report = await db.scalar(
+                    select(LostTicketReport).where(LostTicketReport.transaction_id == tx.id)
+                )
+                if report is not None:
+                    transaction_data["lost_ticket"] = {
+                        k: getattr(report, k)
+                        for k in (
+                            "resi", "plate_number", "driver_name", "id_number", "address",
+                            "rt_rw", "kelurahan", "kecamatan", "city",
+                            "tariff_amount", "penalty_amount",
+                        )
+                    }
     return transaction_data
 
 
@@ -142,12 +157,6 @@ async def _enqueue_print_receipt(
     F12 in the POS to print it manually).
     """
     try:
-        if not force and not await _setting_enabled(
-            db, "pos_auto_print_receipt", default=True
-        ):
-            logger.info("receipt_print_skipped_auto_disabled", gate_id=gate_id)
-            return
-
         from api.app.models import Gate
         from shared.redis import get_arq_redis
 
@@ -158,6 +167,13 @@ async def _enqueue_print_receipt(
             return
 
         await _receipt_context(db, gate, transaction_data)
+
+        # Lost-ticket proof always prints (Compass "Bukti Pembayaran Denda").
+        if not force and not transaction_data.get("lost_ticket") and not await _setting_enabled(
+            db, "pos_auto_print_receipt", default=True
+        ):
+            logger.info("receipt_print_skipped_auto_disabled", gate_id=gate_id)
+            return
 
         arq_redis = await get_arq_redis()
         tx_id = transaction_data.get("transaction_id")

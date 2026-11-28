@@ -277,9 +277,13 @@ def _build_escpos_shift_slip(summary: dict[str, Any], location_name: str = "") -
         rule,
     ]
     out += [money_row(label, int(m.get("count", 0)), int(m.get("amount", 0))) for label, m in rows]
+    total = int(summary.get("total_amount") or 0)
+    penalty = int(summary.get("penalty_amount") or 0)
     out += [
         rule,
-        money_row("Total", int(summary.get("total_count") or 0), int(summary.get("total_amount") or 0)),
+        money_row("Pendapatan Parkir", None, total - penalty),
+        money_row("Pendapatan Denda", int(summary.get("penalty_count") or 0), penalty),
+        money_row("Total", int(summary.get("total_count") or 0), total),
         b"\x1bE\x01", money_row("Uang tunai diserahkan", None, cash), b"\x1bE\x00",
         line("Terbilang:"),
         *(line(part) for part in textwrap.wrap(f"## {terbilang(cash)} rupiah ##", cols)),
@@ -673,6 +677,24 @@ def _build_escpos_receipt(
     ]
     if veh_gate:
         lines.append(center(veh_gate))
+    lost = transaction_data.get("lost_ticket")
+    if lost:
+        # Compass "BUKTI PEMBAYARAN DENDA KARCIS HILANG" block.
+        lines += [
+            line(""),
+            b"\x1bE\x01", center("DENDA KARCIS HILANG"), b"\x1bE\x00",
+            label_row("TARIF", _format_rp(lost.get("tariff_amount") or 0)),
+            label_row("DENDA", _format_rp(lost.get("penalty_amount") or 0)),
+            label_row("NO. RESI", lost.get("resi") or ""),
+            label_row("NO. KEND", lost.get("plate_number") or ""),
+            label_row("NAMA", lost.get("driver_name") or ""),
+            label_row("NO. ID", lost.get("id_number") or ""),
+            label_row("ALAMAT", lost.get("address") or ""),
+            label_row("RT/RW", lost.get("rt_rw") or ""),
+            label_row("KEL.", lost.get("kelurahan") or ""),
+            label_row("KEC.", lost.get("kecamatan") or ""),
+            label_row("KOTA", lost.get("city") or ""),
+        ]
     lines += [
         line(""),
         label_row("WAKTU MASUK", f"{date_in} {time_in}".strip()),

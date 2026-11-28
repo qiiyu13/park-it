@@ -17,7 +17,7 @@ from api.app.services.tariff import (
     DEFAULT_TARIFF_CONFIG,
     TariffConfig,
     VehicleTypeRate,
-    calculate_tariff,
+    calculate_tariff_parts,
 )
 from shared.config import get_settings
 from shared.logging import get_logger
@@ -199,6 +199,7 @@ async def get_vehicle_type_tariff_config(
             )
         },
         grace_period_minutes=15,
+        lost_ticket_penalty_added=await _setting_bool(db, "lost_ticket_penalty_added", True),
     )
     return config, vt.code
 
@@ -221,13 +222,36 @@ async def lane_vehicle_type_id(db: AsyncSession, gate_out_id: int | None) -> int
         return None
 
 
+async def _setting_bool(db: AsyncSession, key: str, default: bool) -> bool:
+    from api.app.models.setting import Setting
+
+    value = await db.scalar(select(Setting.value).where(Setting.key == key))
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 async def calculate_transaction_fee(
     db: AsyncSession,
     transaction: ParkingTransaction,
     exit_time: datetime | None = None,
     vehicle_type_id_override: int | None = None,
 ) -> int:
-    """Calculate parking fee for a transaction.
+    """Total fee (time fee + lost-ticket denda). See calculate_transaction_fee_parts."""
+    return sum(
+        await calculate_transaction_fee_parts(
+            db, transaction, exit_time, vehicle_type_id_override
+        )
+    )
+
+
+async def calculate_transaction_fee_parts(
+    db: AsyncSession,
+    transaction: ParkingTransaction,
+    exit_time: datetime | None = None,
+    vehicle_type_id_override: int | None = None,
+) -> tuple[int, int]:
+    """Calculate (time fee, denda) for a transaction.
 
     Args:
         db: Database session
@@ -236,7 +260,7 @@ async def calculate_transaction_fee(
         vehicle_type_id_override: Use this vehicle type instead of the one on the transaction
 
     Returns:
-        Fee in IDR
+        (time fee, denda) in IDR
     """
     if exit_time is None:
         exit_time = datetime.now(UTC)
@@ -271,7 +295,7 @@ async def calculate_transaction_fee(
     # them. Duration is timezone-invariant; only the date crossing changes.
     tz = ZoneInfo(get_settings().app_timezone)
     try:
-        fee = calculate_tariff(
+        parts = calculate_tariff_parts(
             entry_time=transaction.entry_time.astimezone(tz),
             exit_time=exit_time.astimezone(tz),
             vehicle_type_code=vt_code,
@@ -289,7 +313,30 @@ async def calculate_transaction_fee(
         )
         raise
 
-    return fee
+    return parts
+
+
+async def _record_lost_ticket_split(
+    db: AsyncSession,
+    transaction: ParkingTransaction,
+    fee: int,
+    exit_time: datetime,
+    gate_out_id: int,
+    operator_id: int | None,
+) -> None:
+    """Store Pendapatan Parkir / Denda for the shift slip and reports."""
+    from api.app.models import LostTicketReport
+
+    report = await db.scalar(
+        select(LostTicketReport).where(LostTicketReport.transaction_id == transaction.id)
+    )
+    if report is None:
+        return
+    _, penalty = await calculate_transaction_fee_parts(db, transaction, exit_time)
+    report.penalty_amount = min(penalty, fee)
+    report.tariff_amount = fee - report.penalty_amount
+    report.gate_out_id = gate_out_id
+    report.operator_id = operator_id or report.operator_id
 
 
 async def complete_exit_transaction(
@@ -334,6 +381,9 @@ async def complete_exit_transaction(
     transaction.operator_id = operator_id
     transaction.shift_id = shift_id
     transaction.status = "COMPLETED"
+
+    if transaction.is_lost_ticket:
+        await _record_lost_ticket_split(db, transaction, fee, now, gate_out_id, operator_id)
 
     # Release one slot in the entry gate's area. GREATEST(...,0) prevents the
     # negative occupancy the legacy system was famous for when counters drift.

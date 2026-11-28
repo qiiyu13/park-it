@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.app.middleware.auth import require_admin
 from api.app.models.emoney_transaction import EmoneyTransaction
 from api.app.models.gate import Gate
+from api.app.models.lost_ticket_report import LostTicketReport
 from api.app.models.parking_transaction import ParkingTransaction
 from api.app.models.shift import Shift
 from api.app.models.site_config import SiteConfig
@@ -292,8 +293,10 @@ async def get_exit_gate_report(
             Gate.name.label("gate_name"),
             func.coalesce(User.full_name, User.username).label("operator_name"),
             VehicleType.name.label("vehicle_type"),
+            LostTicketReport.penalty_amount,
         )
         .outerjoin(Gate, Gate.id == ParkingTransaction.gate_out_id)
+        .outerjoin(LostTicketReport, LostTicketReport.transaction_id == ParkingTransaction.id)
         .outerjoin(User, User.id == ParkingTransaction.operator_id)
         .outerjoin(VehicleType, VehicleType.id == ParkingTransaction.vehicle_type_id)
         .where(
@@ -308,8 +311,10 @@ async def get_exit_gate_report(
 
     items: list[dict] = []
     by_method: dict[str, int] = {}
-    for tx, gate_name, operator_name, vehicle_type in (await db.execute(query)).all():
+    total_penalty = 0
+    for tx, gate_name, operator_name, vehicle_type, penalty in (await db.execute(query)).all():
         fee = tx.fee or 0
+        total_penalty += penalty or 0
         method = tx.payment_method or "LAINNYA"
         by_method[method] = by_method.get(method, 0) + fee
         items.append({
@@ -322,12 +327,70 @@ async def get_exit_gate_report(
             "vehicle_type": vehicle_type,
             "payment_method": method,
             "fee": fee,
+            "penalty": penalty or 0,
+        })
+    total = sum(by_method.values())
+    return {
+        "items": items,
+        "total_count": len(items),
+        "total_amount": total,
+        "total_penalty": total_penalty,
+        "total_tariff": total - total_penalty,
+        "by_method": by_method,
+    }
+
+
+@router.get("/lost-tickets")
+async def get_lost_ticket_report(
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin),
+) -> dict:
+    """Lost-ticket records with the driver's identity, by local report day."""
+    start, end = _local_bounds(date_from, date_to)
+    rows = await db.execute(
+        select(
+            LostTicketReport,
+            ParkingTransaction.entry_time,
+            ParkingTransaction.exit_time,
+            ParkingTransaction.status,
+            Gate.name.label("gate_name"),
+            func.coalesce(User.full_name, User.username).label("operator_name"),
+        )
+        .join(ParkingTransaction, ParkingTransaction.id == LostTicketReport.transaction_id)
+        .outerjoin(Gate, Gate.id == LostTicketReport.gate_out_id)
+        .outerjoin(User, User.id == LostTicketReport.operator_id)
+        .where(LostTicketReport.created_at >= start, LostTicketReport.created_at < end)
+        .order_by(LostTicketReport.created_at)
+    )
+    items = []
+    for report, entry_time, exit_time, status, gate_name, operator_name in rows.all():
+        items.append({
+            "resi": report.resi,
+            "plate_number": report.plate_number,
+            "driver_name": report.driver_name,
+            "id_number": report.id_number,
+            "address": ", ".join(
+                p for p in (
+                    report.address,
+                    f"RT/RW {report.rt_rw}" if report.rt_rw else None,
+                    report.kelurahan, report.kecamatan, report.city,
+                ) if p
+            ),
+            "notes": report.notes,
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "paid": status == "COMPLETED",
+            "tariff": report.tariff_amount or 0,
+            "penalty": report.penalty_amount or 0,
+            "gate_name": gate_name,
+            "operator_name": operator_name,
         })
     return {
         "items": items,
         "total_count": len(items),
-        "total_amount": sum(by_method.values()),
-        "by_method": by_method,
+        "total_penalty": sum(i["penalty"] for i in items),
     }
 
 

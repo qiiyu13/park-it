@@ -239,6 +239,7 @@ function onGlobalKeydown(e) {
   const active = document.activeElement
   const tag = active?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active?.isContentEditable) return
+  if (document.querySelector('[data-pos-modal]')) return  // a dialog owns the keys
   focusPlate()
 }
 

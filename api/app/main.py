@@ -105,6 +105,22 @@ async def lifespan(app: FastAPI):
                 "payment",
             ),
             (
+                "lost_ticket_penalty_added",
+                "true",
+                "bool",
+                "Denda karcis hilang ditambahkan ke tarif",
+                "Aktif: bayar = tarif parkir + denda (seperti Compass). Matikan bila denda dipakai sebagai tarif minimal. Besar denda diatur per jenis kendaraan.",
+                "payment",
+            ),
+            (
+                "lost_ticket_default_entry",
+                "06:00",
+                "string",
+                "Jam buka parkir (jam masuk karcis hilang)",
+                "Format JJ:MM. Dipakai sebagai perkiraan jam masuk karcis hilang; operator bisa mengubahnya di POS.",
+                "pos",
+            ),
+            (
                 "cash_auto_open",
                 "true",
                 "bool",
@@ -204,6 +220,7 @@ def create_app() -> FastAPI:
         emoney_readers,
         gates_unified,
         health,
+        lost_tickets,
         manual_open_logs,
         members,
         operator_alerts,
@@ -251,6 +268,7 @@ def create_app() -> FastAPI:
     app.include_router(audit_logs.router, prefix="/api")
     app.include_router(printers.router, prefix="/api")
     app.include_router(operator_alerts.router, prefix="/api")
+    app.include_router(lost_tickets.router, prefix="/api")
     app.include_router(snapshots.router, prefix="/api")
     app.include_router(setup.router, prefix="/api")
 

@@ -19,8 +19,9 @@ Pricing model (per vehicle type):
   once per calendar-date boundary crossed; ``"24h"`` adds it once per full 24h
   block; ``"none"`` disables it.
 * ``daily_cap`` — caps the time-based fee per 24h block (0 = no cap).
-* ``lost_ticket_penalty`` — when the ticket is lost the fee is at least this
-  amount (a floor, applied on top of / instead of the measured-time fee).
+* ``lost_ticket_penalty`` — denda when the ticket is lost. With
+  ``TariffConfig.lost_ticket_penalty_added`` (default) it is added to the
+  time fee (Compass "TARIF + DENDA"); otherwise it is a minimum fee.
 
 Example configuration (stored in Setting model or config file):
     {
@@ -49,7 +50,7 @@ class VehicleTypeRate:
     base_tariff: int = 0  # Flat charge for the first hour
     overnight_mode: str = "none"  # "midnight" | "24h" | "none"
     overnight_tariff: int = 0  # Surcharge per night
-    lost_ticket_penalty: int = 0  # Minimum fee floor when ticket is lost
+    lost_ticket_penalty: int = 0  # Denda when the ticket is lost
     tariff_mode: str = "hourly"  # "flat" | "hourly" | "progressive"
     grace_period_minutes: int | None = None  # None = use TariffConfig default
 
@@ -60,6 +61,7 @@ class TariffConfig:
 
     vehicle_types: dict[str, VehicleTypeRate]
     grace_period_minutes: int = 15
+    lost_ticket_penalty_added: bool = True  # False = denda is a minimum fee
 
 
 def calculate_tariff(
@@ -70,17 +72,33 @@ def calculate_tariff(
     *,
     is_lost_ticket: bool = False,
 ) -> int:
-    """Calculate parking fee based on entry/exit time and vehicle type.
+    """Total fee in Rupiah (time fee + denda). See ``calculate_tariff_parts``."""
+    return sum(
+        calculate_tariff_parts(
+            entry_time, exit_time, vehicle_type_code, config, is_lost_ticket=is_lost_ticket
+        )
+    )
+
+
+def calculate_tariff_parts(
+    entry_time: datetime,
+    exit_time: datetime,
+    vehicle_type_code: str,
+    config: TariffConfig,
+    *,
+    is_lost_ticket: bool = False,
+) -> tuple[int, int]:
+    """Calculate (time fee, denda) based on entry/exit time and vehicle type.
 
     Args:
         entry_time: When vehicle entered
         exit_time: When vehicle exited
         vehicle_type_code: Key in config.vehicle_types (e.g. "MOTOR", "MOBIL")
         config: Tariff configuration
-        is_lost_ticket: Apply the lost-ticket penalty floor and bypass grace
+        is_lost_ticket: Apply the lost-ticket denda and bypass grace
 
     Returns:
-        Fee in Rupiah
+        (time fee, denda) in Rupiah; denda is 0 unless the ticket is lost
 
     Raises:
         ValueError: If exit precedes entry or the vehicle type is unknown
@@ -101,7 +119,7 @@ def calculate_tariff(
         else config.grace_period_minutes
     )
     if not is_lost_ticket and duration_minutes <= grace:
-        return 0
+        return 0, 0
 
     # Round up to whole started hours (minimum 1 once past grace).
     hours = max(1, ceil(duration_minutes / MINUTES_PER_HOUR))
@@ -129,12 +147,16 @@ def calculate_tariff(
         days = max(1, ceil(duration_minutes / MINUTES_PER_DAY))
         fee = min(fee, days * rate.daily_cap)
 
-    # Lost-ticket penalty floor — applied after the cap so the denda is never
-    # eroded by the per-day cap.
+    # Lost-ticket denda — applied after the cap so it is never eroded by the
+    # per-day cap. Minimum-fee mode reports only the top-up as denda.
+    penalty = 0
     if is_lost_ticket and rate.lost_ticket_penalty > 0:
-        fee = max(fee, rate.lost_ticket_penalty)
+        if config.lost_ticket_penalty_added:
+            penalty = rate.lost_ticket_penalty
+        else:
+            penalty = max(0, rate.lost_ticket_penalty - fee)
 
-    return fee
+    return fee, penalty
 
 
 # Default configuration for development / first-time setup
